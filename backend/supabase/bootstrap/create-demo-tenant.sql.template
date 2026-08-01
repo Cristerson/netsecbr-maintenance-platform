@@ -1,0 +1,36 @@
+-- Cria tenant, centro de custo, unidade e vínculo administrativo em uma transação.
+-- Substitua o UUID antes de executar.
+
+do $$
+declare
+  target_user_id uuid := '<UUID_DO_ADMINISTRADOR>';
+  new_tenant_id uuid;
+  new_cost_center_id uuid;
+begin
+  insert into public.tenants (legal_name, trade_name)
+  values ('NETSECBR Demonstração Ltda.', 'NETSECBR Demonstração')
+  returning id into new_tenant_id;
+
+  insert into public.cost_centers (tenant_id, code, name)
+  values (new_tenant_id, 'CC-001', 'Operações')
+  returning id into new_cost_center_id;
+
+  insert into public.units (tenant_id, cost_center_id, name, code, city, state)
+  values (new_tenant_id, new_cost_center_id, 'Matriz', 'UNI-001', 'São Paulo', 'SP');
+
+  insert into public.tenant_memberships (tenant_id, user_id, role)
+  values (new_tenant_id, target_user_id, 'tenant_admin');
+end;
+$$;
+
+-- Validação: deve retornar um tenant, um centro de custo e uma unidade.
+select
+  tenant.trade_name as tenant,
+  cost_center.code as cost_center_code,
+  cost_center.name as cost_center,
+  unit.code as unit_code,
+  unit.name as unit
+from public.tenants tenant
+join public.cost_centers cost_center on cost_center.tenant_id = tenant.id
+join public.units unit on unit.cost_center_id = cost_center.id
+where tenant.trade_name = 'NETSECBR Demonstração';

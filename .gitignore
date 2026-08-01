@@ -1,0 +1,13 @@
+# Segredos e configuração local
+backend/private/keepalive-config.php
+.env
+.env.*
+!.env.example
+
+# Dependências e builds
+Frontend/node_modules/
+Frontend/dist/
+Frontend/.npm-cache/
+Frontend/*.tsbuildinfo
+Frontend/vite.config.js
+Frontend/vite.config.d.ts

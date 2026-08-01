@@ -1,0 +1,57 @@
+-- Cria um plano e contrato de demonstração sem cobrança.
+-- Execute após a migration de subscription_plans e subscriptions.
+
+insert into public.subscription_plans (
+  name, robot_limit, annual_price_cents, included_storage_bytes, description
+)
+values (
+  'Demonstração - 10 robôs', 10, 0, 52428800,
+  'Plano interno de validação sem cobrança.'
+)
+on conflict (name) do nothing;
+
+insert into public.subscriptions (
+  tenant_id,
+  plan_id,
+  plan_name_snapshot,
+  robot_limit_snapshot,
+  annual_price_cents_snapshot,
+  included_storage_bytes_snapshot,
+  status,
+  contract_start_date,
+  billing_start_date,
+  contract_end_date,
+  notes
+)
+select
+  tenant.id,
+  plan.id,
+  plan.name,
+  plan.robot_limit,
+  plan.annual_price_cents,
+  plan.included_storage_bytes,
+  'active',
+  current_date,
+  current_date,
+  (current_date + interval '1 year')::date,
+  'Contrato interno de demonstração; não gera cobrança.'
+from public.tenants tenant
+join public.subscription_plans plan on plan.name = 'Demonstração - 10 robôs'
+where tenant.trade_name = 'NETSECBR Demonstração'
+  and not exists (
+    select 1
+    from public.subscriptions subscription
+    where subscription.tenant_id = tenant.id
+      and subscription.status in ('draft', 'trial', 'active')
+  );
+
+select
+  tenant.trade_name,
+  subscription.plan_name_snapshot,
+  subscription.robot_limit_snapshot,
+  subscription.included_storage_bytes_snapshot / 1024 / 1024 as storage_limit_mb,
+  subscription.status,
+  subscription.contract_end_date
+from public.subscriptions subscription
+join public.tenants tenant on tenant.id = subscription.tenant_id
+where tenant.trade_name = 'NETSECBR Demonstração';

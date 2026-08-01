@@ -1,0 +1,15 @@
+-- Execute pelo SQL Editor após criar o usuário no Supabase Auth.
+-- Substitua os valores entre aspas antes de executar.
+
+update public.profiles
+set
+  full_name = '<NOME_DO_ADMINISTRADOR>',
+  platform_role = 'netsecbr_admin',
+  is_active = true,
+  updated_at = now()
+where id = '<UUID_DO_USUARIO_AUTH>';
+
+-- Validação: deve retornar exatamente uma linha com platform_role = netsecbr_admin.
+select id, full_name, platform_role, is_active
+from public.profiles
+where id = '<UUID_DO_USUARIO_AUTH>';
