@@ -1,0 +1,10 @@
+.auth-screen{margin:0;width:100%;min-height:100vh;display:grid;place-items:center;padding:24px;background:radial-gradient(circle at top right,#0b70b7 0,#071b42 42%,#04102a 100%)}
+.auth-card{width:min(420px,100%);padding:34px;background:#fff;border-radius:14px;box-shadow:0 25px 70px #010c2766}
+.auth-card img{display:block;width:165px;max-height:55px;object-fit:contain;object-position:left;margin-bottom:24px}
+.auth-card h1{font-size:25px;margin:6px 0 10px}
+.auth-card>p:not(.eyebrow):not(.auth-message){font-size:13px;line-height:1.5;color:#667996;margin:0 0 24px}
+.auth-message{font-size:12px;color:#a62d2d;background:#fff0f0;border:1px solid #ffd5d5;padding:9px 10px;border-radius:7px;margin:12px 0 0}
+.auth-success{color:#176b47;background:#eaf8ef;border-color:#ccefd8}
+.auth-card button:disabled{cursor:wait;opacity:.72}
+.password-field{position:relative;display:block}.password-field input{padding-right:42px}.password-toggle{position:absolute;right:1px;top:1px;height:38px;width:38px;border:0;background:transparent;color:#527295;display:grid;place-items:center;cursor:pointer;border-radius:6px}.password-toggle:hover{background:#eef5fb;color:#075b99}
+.auth-link{display:block;margin:16px auto 0;border:0;background:transparent;color:#0767aa;font:600 13px inherit;cursor:pointer}.auth-link:hover{text-decoration:underline}

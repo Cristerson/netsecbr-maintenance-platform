@@ -5,18 +5,20 @@ O roadmap detalhado está em `documentação/13-Roadmap.md`.
 ## Agora — Fundação
 
 - Documentação, identidade visual e protótipo web.
-- Definição de modelo SaaS, tenants, cobrança e infraestrutura inicial.
+- Modelo SaaS, tenants, perfis, isolamento de dados, contratos e franquias personalizadas estruturados no Supabase.
 
 ## Próxima entrega — Base real do MVP
 
-- Configurar Supabase.
-- Criar modelo de dados com tenant, unidade e centro de custo.
-- Autenticação, perfis e isolamento entre clientes.
+- Conectar o frontend ao Supabase com autenticação.
+- Exibir o tenant e o perfil do usuário autenticado.
+- Consultar ativos e ordens de serviço reais do tenant autenticado.
+- Gerenciar usuários, permissões e acesso por domínio corporativo.
 
 ## Em seguida — Operação de manutenção
 
-- Ativos e robôs.
-- Solicitações, ordens de serviço e checklists.
+- Cadastro real de ativos e robôs, com escolha de unidade, centro de custo e categoria.
+- Cadastro e atualização de ordens de serviço.
+- Solicitações e checklists.
 - Painéis e relatórios básicos.
 
 ## Evolução

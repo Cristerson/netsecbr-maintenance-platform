@@ -17,7 +17,16 @@
 6. Planos preventivos e calendário.
 7. Modelos de checklist.
 8. Usuários e permissões (administrador).
+9. Administração de fornecedores.
+10. Integrações e importações de dados.
+
+## Administração de usuários
+
+O administrador do cliente pode cadastrar usuários, ativar ou desativar acessos e atribuir permissões. A interface usa ações principais com texto e ícone, enquanto ações por linha usam ícones com dica de contexto. A criação chama uma Edge Function segura e respeita o domínio corporativo configurado para o tenant.
 
 ## Experiência de execução de OS
 
 A tela deve apresentar ativo, prioridade, descrição, checklist, responsáveis, anexos e apontamento de tempo. O botão de concluir só aparece quando os requisitos da OS estiverem atendidos.
+# Importação inicial
+
+No MVP, a importação de ativos será feita por CSV UTF-8 exportado do Excel. O frontend validará colunas, códigos duplicados, unidade, categoria, criticidade e status antes de pedir confirmação para gravar. A leitura direta de `.xlsx` será implementada futuramente no backend, onde o processamento de arquivos poderá ser mais controlado.

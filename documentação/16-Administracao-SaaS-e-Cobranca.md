@@ -38,6 +38,12 @@ Portal do Cliente (tenant isolado)
 - Franquia inicial de 50 MB para arquivos do tenant.
 - Centro(s) de custo associado(s) para visualização do cliente.
 
+## Franquias personalizadas por cliente
+
+O catálogo de planos define o ponto de partida, mas a NETSECBR pode registrar no contrato uma franquia própria de robôs, armazenamento, ordens mensais, usuários, unidades ou um novo tipo de limite futuro. Cada alteração encerra a franquia anterior e cria outra com nova vigência, preservando o histórico comercial.
+
+Na validação de uso, vale a franquia vigente do contrato. Quando não existir uma personalização, o sistema utiliza a cópia do plano registrada no contrato. Um limite também pode ser marcado como ilimitado.
+
 ## Diretrizes para pagamento
 
 Cartão e PIX devem ser processados por provedor especializado. A plataforma guarda apenas referências e status de pagamento, jamais dados completos de cartão. Webhooks do provedor atualizam as faturas e restauram ou restringem acessos de forma auditável.

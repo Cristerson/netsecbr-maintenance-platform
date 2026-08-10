@@ -1,0 +1,2 @@
+codigo,nome,unidade,categoria,e_robo,fabricante,modelo,numero_serie,criticidade,status,data_instalacao,observacoes
+RB-001,Robô de demonstração,UNI-001,Robôs,sim,FANUC,M-20iA,SN-EXEMPLO-001,critica,active,2026-08-01,Remova esta linha de exemplo antes de importar
