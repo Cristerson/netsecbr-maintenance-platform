@@ -1,10 +1,12 @@
 import { type FormEvent, useCallback, useEffect, useState } from 'react';
 import {
+  ExternalLink,
   PackagePlus,
   Plus,
   RefreshCw,
   Trash2,
   X,
+  
 } from 'lucide-react';
 import { supabase } from './supabase';
 
@@ -62,6 +64,12 @@ const priorityLabels = {
   high: 'Alta',
   critical: 'Crítica',
 };
+const manufacturerCatalogs = {
+  ABB: 'https://one.robotics.abb.com/',
+  KUKA: 'https://my.kuka.com/',
+  FANUC: 'https://www.fanuc.com/service/',
+  Yaskawa: 'https://www.yaskawa.com/spareparts/index',
+};
 
 function createEmptyItem(): ItemDraft {
   return {
@@ -83,6 +91,28 @@ export function PurchaseRequestAdmin({
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [requests, setRequests] = useState<PurchaseRequest[]>([]);
   const [supplierId, setSupplierId] = useState('');
+  const [manufacturerCatalog, setManufacturerCatalog] = useState('');
+  const selectedManufacturerUrl = manufacturerCatalog
+    ? manufacturerCatalogs[
+        manufacturerCatalog as keyof typeof manufacturerCatalogs
+      ]
+    : null;
+
+  function openManufacturerCatalog() {
+    if (!selectedManufacturerUrl) return;
+
+    const catalogWindow = window.open(
+      selectedManufacturerUrl,
+      'netsecbr_manufacturer_catalog',
+      'popup=yes,width=1280,height=900,noopener,noreferrer',
+    );
+
+    if (!catalogWindow) {
+      setErrorMessage(
+        'O navegador bloqueou a janela do fabricante. Libere pop-ups para localhost e tente novamente.',
+      );
+    }
+  }
   const [priority, setPriority] = useState(order.priority);
   const [notes, setNotes] = useState('');
   const [items, setItems] = useState<ItemDraft[]>([createEmptyItem()]);
@@ -145,6 +175,7 @@ export function PurchaseRequestAdmin({
 
     setItems((current) => current.filter((item) => item.id !== id));
   }
+  
 
   async function saveRequest(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -298,7 +329,30 @@ export function PurchaseRequestAdmin({
               ))}
             </select>
           </label>
+<label className="field">
+  <span>Consultar fabricante</span>
 
+  <select
+    value={manufacturerCatalog}
+    onChange={(event) => setManufacturerCatalog(event.target.value)}
+  >
+    <option value="">Selecione a marca</option>
+    {Object.keys(manufacturerCatalogs).map((manufacturer) => (
+      <option key={manufacturer} value={manufacturer}>
+        {manufacturer}
+      </option>
+    ))}
+  </select>
+            <button
+              type="button"
+              className="secondary button-with-icon"
+              disabled={!selectedManufacturerUrl}
+              onClick={openManufacturerCatalog}
+            >
+              <ExternalLink size={17} />
+              Abrir catálogo oficial
+            </button>
+</label>
           <label className="field">
             <span>Prioridade</span>
             <select

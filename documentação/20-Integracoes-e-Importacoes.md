@@ -15,6 +15,12 @@ As integrações futuras deverão suportar SAP e TOTVS, além de conectores exte
 
 Nenhuma integração pode alterar dados automaticamente sem mapeamento de campos, identificação do tenant, registro de auditoria e aprovação da regra de sincronização.
 
+## Consulta a catálogos de fabricantes
+
+Na primeira versão, a requisição de compra permite consultar os portais oficiais de ABB, KUKA, FANUC e Yaskawa em uma janela independente. Esta é uma consulta assistida: o usuário confirma fabricante, modelo, part number, prazo e preço antes de registrar o item.
+
+Não há integração automática de catálogos, scraping, credenciais de fabricante ou sugestão automática de part number. Uma integração futura só será criada quando o fabricante disponibilizar API ou canal comercial autorizado, com validação contratual, auditoria e isolamento por tenant.
+
 ## Importações
 
 Quando o cliente não possuir integração ERP, a plataforma oferecerá importação por CSV UTF-8 e cadastro manual. A primeira etapa prioriza fornecedores e ativos.

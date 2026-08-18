@@ -12,6 +12,7 @@ import {
   Menu,
   Plus,
   Search,
+  ShoppingCart,
   Wrench,
   X,
 } from 'lucide-react';
@@ -30,6 +31,7 @@ import { SupplierAdmin as SupplierAdminModule } from './supplier-admin';
 import { OrganizationAdmin } from './organization-admin';
 import { BrandingAdmin } from './branding-admin';
 import { FinanceAdmin } from './finance-admin';
+import { PurchaseManagement } from './purchase-management';
 import './styles.css';
 import './brand.css';
 import './auth.css';
@@ -44,18 +46,20 @@ function Badge({ children }: { children: string }) {
 
 function App({ account }: { account: CurrentAccount }) {
   const [page, setPage] = useState<
-    'dashboard' | 'assets' | 'requests' | 'orders' | 'client_admin' | 'netsecbr_admin'
+    'dashboard' | 'assets' | 'requests' | 'orders' | 'purchases' | 'client_admin' | 'netsecbr_admin'
   >('dashboard');
   const [menuOpen, setMenuOpen] = useState(false);
   const { assets, orders, isLoading, error } = useOperationalData(account.tenantId);
   const [search, setSearch] = useState('');
   const [clientAdminNavigationSignal, setClientAdminNavigationSignal] = useState(0);
 
-  const nav = [
+
+     const nav = [
     { id: 'dashboard', label: 'Visão geral', icon: LayoutDashboard },
     { id: 'assets', label: 'Ativos', icon: Box },
     { id: 'requests', label: 'Solicitações', icon: AlertTriangle },
     { id: 'orders', label: 'Ordens de serviço', icon: ClipboardList },
+    { id: 'purchases', label: 'Compras', icon: ShoppingCart },
     { id: 'client_admin', label: 'Administração do cliente', icon: Factory },
     { id: 'netsecbr_admin', label: 'Control Center NETSECBR', icon: Wrench },
   ] as const;
@@ -87,7 +91,13 @@ function App({ account }: { account: CurrentAccount }) {
         canAccess('work_orders.execute')
       );
     }
-
+    if (id === 'purchases') {
+      return (
+        canAccess('purchase_requests.read') ||
+        canAccess('purchase_requests.create') ||
+        canAccess('purchase_requests.approve')
+      );
+    }
     if (id === 'client_admin') {
       return account.isTenantAdmin || account.isNetsecbrAdmin;
     }
@@ -190,6 +200,8 @@ function App({ account }: { account: CurrentAccount }) {
                     ? 'Solicitações de manutenção'
                     : page === 'orders'
                       ? 'Ordens de serviço'
+                    : page === 'purchases'
+                   ? 'Compras'
                       : page === 'client_admin'
                         ? 'Administração do Cliente'
                         : 'Control Center NETSECBR'}
@@ -255,7 +267,17 @@ function App({ account }: { account: CurrentAccount }) {
             }
           />
         )}
-
+        {!isLoading && page === 'purchases' && (
+          <PurchaseManagement
+            tenantId={account.tenantId}
+            currentUserId={account.userId}
+            canManage={
+              account.isNetsecbrAdmin ||
+              account.isTenantAdmin ||
+              account.permissions.includes('purchase_requests.approve')
+            }
+          />
+        )}
         {!isLoading && page === 'client_admin' && (
           <AdminPanel
             account={account}

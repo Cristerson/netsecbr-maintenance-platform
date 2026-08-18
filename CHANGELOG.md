@@ -47,3 +47,6 @@ Todas as mudanças relevantes do projeto serão registradas aqui.
 - CRUD completo de solicitações de manutenção no painel do cliente, com abertura, triagem, cancelamento, conversão em ordem de serviço e filtro por status.
 - Migration de requisições de compra e itens, vinculadas à OS, com validação de escopo multi-tenant, RLS e fornecedor sugerido opcional.
 - Tela de requisições dentro da OS, com inclusão de materiais ou serviços, quantidades, valor estimado e consulta do andamento inicial.
+- Painel central de Compras para acompanhar as requisições do tenant e registrar aprovação, envio ao fornecedor e recebimento.
+- Sincronização automática entre requisições de compra e OS: materiais pendentes deixam a OS em aguardando material; o recebimento libera a execução novamente.
+- Consulta ao catálogo oficial de ABB, KUKA, FANUC e Yaskawa a partir da requisição, aberta em janela separada para preservar o contexto da OS.

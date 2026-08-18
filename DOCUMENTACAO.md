@@ -37,6 +37,10 @@ Consultas operacionais no frontend devem filtrar explicitamente pelo `tenant_id`
 
 Requisições de compra são sempre vinculadas a uma OS. A base replica tenant, unidade, centro de custo e ativo da ordem e um gatilho impede associações inconsistentes. O fornecedor é inicialmente apenas sugerido; aprovação, envio, recebimento e futuras integrações com ERP serão rastreados por status, sem envio automático ao fornecedor.
 
+O fluxo de materiais sincroniza a OS no banco: uma requisição de material pendente, aprovada ou enviada deixa a ordem em `aguardando material`; depois que não houver pendências e o recebimento for registrado, ela volta para `em andamento`. O sistema nunca conclui uma OS automaticamente por causa de uma compra.
+
+A consulta ao fabricante abre o portal oficial selecionado em uma janela separada, sem credenciais, automação de login ou coleta de dados. Nesta versão, o técnico ou comprador confirma manualmente o part number e os dados comerciais antes de adicioná-los à requisição.
+
 ## Padrões
 
 - Produto modular e SaaS, sem personalizações que alterem o núcleo.
