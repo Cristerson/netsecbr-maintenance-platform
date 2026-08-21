@@ -46,6 +46,7 @@ Este é o local oficial de trabalho. O código e a documentação são versionad
 | [LGPD e Privacidade](documentação/18-LGPD-e-Privacidade.md) | Princípios, dados tratados e controles de privacidade. |
 | [Keep-Alive Supabase](documentação/19-Keep-Alive-Supabase.md) | Atividade diária temporária para desenvolvimento e piloto. |
 | [Integrações e Importações](documentação/20-Integracoes-e-Importacoes.md) | ERP, CSV e fornecedores por tenant. |
+| [Experiência e Operação de Campo](documentação/21-Experiencia-e-Operacao-de-Campo.md) | Linguagem, fluxos de técnicos, áudio temporário, Android e padrão visual. |
 
 Leia também [PROJECT_RULES.md](PROJECT_RULES.md) antes de propor ou alterar código.
 
@@ -60,3 +61,4 @@ O projeto é construído em pequenas entregas, com plano, implementação, teste
 - Painel conectado ao Supabase: consulta ativos e ordens de serviço do tenant autenticado.
 - Administração inicial de usuários e permissões, com cadastro seguro por Edge Function.
 - Restrição de cadastro por domínio corporativo autorizado para cada tenant.
+- Operação de manutenção e administração global serão experiências distintas: o cliente usa Operações de Manutenção; a NETSECBR usa o Command Center.

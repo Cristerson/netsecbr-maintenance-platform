@@ -41,6 +41,14 @@ O fluxo de materiais sincroniza a OS no banco: uma requisição de material pend
 
 A consulta ao fabricante abre o portal oficial selecionado em uma janela separada, sem credenciais, automação de login ou coleta de dados. Nesta versão, o técnico ou comprador confirma manualmente o part number e os dados comerciais antes de adicioná-los à requisição.
 
+## Experiências e operação de campo
+
+O produto terá dois ambientes claramente separados. O **NETSECBR Command Center** é exclusivo da NETSECBR para administrar tenants, contratos SaaS, cobrança, suporte, segurança e operação global. Cada cliente acessa **Operações de Manutenção**, ambiente destinado a ativos, solicitações, OS, compras, fornecedores e seus cadastros. A futura camada executiva do cliente será chamada **Governança e Performance**.
+
+A experiência de campo prioriza técnicos, operadores e líderes em ambiente industrial. A linguagem deve ser simples e orientada à ação, com recursos como foto, QR Code e ditado. O áudio é uma entrada temporária: ele é transcrito, revisado e aprovado pelo usuário; somente o texto aprovado, a autoria, a data/hora e a indicação de origem por ditado são persistidos. O áudio original é descartado e não integra histórico, backups ou relatórios.
+
+O frontend deve evoluir a partir de um design system NETSECBR único. Antes de novos módulos, a interface deve consolidar shell de aplicação, agrupamento de navegação, ações, tabelas, formulários, badges, modais, estados vazios e hierarquia de páginas. Nenhum módulo deve criar padrões visuais isolados.
+
 ## Padrões
 
 - Produto modular e SaaS, sem personalizações que alterem o núcleo.

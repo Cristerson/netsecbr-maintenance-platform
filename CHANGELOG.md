@@ -50,3 +50,5 @@ Todas as mudanças relevantes do projeto serão registradas aqui.
 - Painel central de Compras para acompanhar as requisições do tenant e registrar aprovação, envio ao fornecedor e recebimento.
 - Sincronização automática entre requisições de compra e OS: materiais pendentes deixam a OS em aguardando material; o recebimento libera a execução novamente.
 - Consulta ao catálogo oficial de ABB, KUKA, FANUC e Yaskawa a partir da requisição, aberta em janela separada para preservar o contexto da OS.
+- Documentada a separação entre NETSECBR Command Center, Operações de Manutenção e a futura camada de Governança e Performance.
+- Documentadas as diretrizes de experiência de campo, app Android em Flutter e ditado com transcrição temporária, revisão humana e descarte do áudio.

@@ -7,21 +7,21 @@ O roadmap detalhado está em `documentação/13-Roadmap.md`.
 - Documentação, identidade visual e protótipo web.
 - Modelo SaaS, tenants, perfis, isolamento de dados, contratos e franquias personalizadas estruturados no Supabase.
 
-## Próxima entrega — Base real do MVP
+## Próxima entrega — Consolidação do MVP operacional
 
-- Conectar o frontend ao Supabase com autenticação.
-- Exibir o tenant e o perfil do usuário autenticado.
-- Consultar ativos e ordens de serviço reais do tenant autenticado.
-- Gerenciar usuários, permissões e acesso por domínio corporativo.
+- Validar ponta a ponta ativos, solicitações, OS, compras, usuários e permissões.
+- Consolidar o design system e a navegação de Operações de Manutenção.
+- Revisar o NETSECBR Command Center como ambiente global distinto.
+- Publicar somente entregas concluídas, mantendo módulos em construção fora dos commits.
 
 ## Em seguida — Operação de manutenção
 
-- Cadastro real de ativos e robôs, com escolha de unidade, centro de custo e categoria.
-- Cadastro e atualização de ordens de serviço.
-- Solicitações e checklists.
-- Painéis e relatórios básicos.
+- Contratos e responsabilidade externa de equipamentos.
+- Custos, indisponibilidade, SLA e evidências na OS.
+- Painel operacional e início da Governança e Performance.
 
 ## Evolução
 
-- Pagamentos, notificações, app móvel, estoque e peças.
+- Pagamentos, notificações, app Android Flutter, estoque e peças.
+- Ditado de campo com transcrição temporária e aprovação humana.
 - Integrações IIoT, IA e migração planejada para VPS.

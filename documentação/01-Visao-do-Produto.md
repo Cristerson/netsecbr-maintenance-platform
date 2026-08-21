@@ -16,6 +16,8 @@ Muitas operações controlam manutenção em planilhas, mensagens e sistemas dif
 - Diretoria e clientes, acompanhando indicadores e relatórios.
 - Empresas de manutenção que atendem múltiplos clientes e unidades.
 
+O usuário recorrente é o técnico de campo ou de fábrica, frequentemente em ambiente ruidoso, com pouco tempo para digitação e conectividade variável. A experiência operacional deve ser adequada a esse contexto, sem esconder os recursos de gestão necessários a líderes e gestores.
+
 ## Proposta de valor
 
 Uma ferramenta simples para o dia a dia do técnico, mas capaz de dar à gestão uma visão confiável de disponibilidade, falhas, custos, produtividade e riscos. O produto deve funcionar para robôs e para qualquer ativo industrial.
@@ -50,11 +52,14 @@ O primeiro pacote será entregue em etapas no MVP e nas evoluções seguintes. O
 - QR Code por ativo para acesso rápido ao histórico.
 - Dashboards com disponibilidade, MTBF, MTTR, pendências e Pareto de falhas.
 - Aplicativo de campo para executar OS, registrar fotos e coletar assinatura.
+- Registro de execução por texto ou ditado, sempre com revisão e aprovação do técnico antes de gravar no histórico.
 - Evolução futura para telemetria industrial e análises assistidas por IA.
 
 ## Fora do MVP
 
 Integrações de PLC, robôs e sensores, análises preditivas, compras completas, integrações ERP e aplicativo nativo não fazem parte da primeira entrega. Serão preparados na arquitetura, mas só desenvolvidos após validação do núcleo.
+
+O aplicativo Android é uma evolução planejada do produto, iniciada após a validação do fluxo responsivo de OS e dos contratos de API necessários para campo.
 
 ## Métricas de sucesso do MVP
 
