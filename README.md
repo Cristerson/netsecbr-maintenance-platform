@@ -12,7 +12,7 @@ O repositório de trabalho da NETSECBR deverá ficar em:
 
 `D:\NetsecBR\Sistema de Gestão Robos`
 
-O diretório atual é um ambiente temporário de desenvolvimento. No momento apropriado, o código e a documentação serão transferidos para o local oficial e publicados em um repositório privado no GitHub, sem a pasta de referências `sources/`.
+Este é o local oficial de trabalho. O código e a documentação são versionados no repositório privado da NETSECBR no GitHub, sem arquivos sensíveis ou referências temporárias.
 
 ## Princípios do produto
 
@@ -45,9 +45,21 @@ O diretório atual é um ambiente temporário de desenvolvimento. No momento apr
 | [Migração para VPS](documentação/17-Plano-de-Migracao-para-VPS.md) | Arquitetura inicial, gatilhos e checklist de evolução. |
 | [LGPD e Privacidade](documentação/18-LGPD-e-Privacidade.md) | Princípios, dados tratados e controles de privacidade. |
 | [Keep-Alive Supabase](documentação/19-Keep-Alive-Supabase.md) | Atividade diária temporária para desenvolvimento e piloto. |
+| [Integrações e Importações](documentação/20-Integracoes-e-Importacoes.md) | ERP, CSV e fornecedores por tenant. |
+| [Experiência e Operação de Campo](documentação/21-Experiencia-e-Operacao-de-Campo.md) | Linguagem, fluxos de técnicos, áudio temporário, Android e padrão visual. |
+| [Arquitetura de Navegação e Funções](documentação/22-Arquitetura-de-Navegacao-e-Funcoes.md) | Mapa dos ambientes, menus, níveis de função e permissões. |
 
 Leia também [PROJECT_RULES.md](PROJECT_RULES.md) antes de propor ou alterar código.
 
 ## Como desenvolvemos
 
 O projeto é construído em pequenas entregas, com plano, implementação, testes, validação e explicação técnica. Consulte [DOCUMENTACAO.md](DOCUMENTACAO.md), [ROADMAP.md](ROADMAP.md) e [CHANGELOG.md](CHANGELOG.md).
+
+## Status do MVP
+
+- Autenticação do frontend integrada ao Supabase.
+- Estrutura multi-tenant de unidades, centros de custo, perfis, ativos, contratos e franquias criada.
+- Painel conectado ao Supabase: consulta ativos e ordens de serviço do tenant autenticado.
+- Administração inicial de usuários e permissões, com cadastro seguro por Edge Function.
+- Restrição de cadastro por domínio corporativo autorizado para cada tenant.
+- Operação de manutenção e administração global serão experiências distintas: o cliente usa Operações de Manutenção; a NETSECBR usa o Command Center.
