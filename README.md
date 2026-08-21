@@ -47,6 +47,7 @@ Este é o local oficial de trabalho. O código e a documentação são versionad
 | [Keep-Alive Supabase](documentação/19-Keep-Alive-Supabase.md) | Atividade diária temporária para desenvolvimento e piloto. |
 | [Integrações e Importações](documentação/20-Integracoes-e-Importacoes.md) | ERP, CSV e fornecedores por tenant. |
 | [Experiência e Operação de Campo](documentação/21-Experiencia-e-Operacao-de-Campo.md) | Linguagem, fluxos de técnicos, áudio temporário, Android e padrão visual. |
+| [Arquitetura de Navegação e Funções](documentação/22-Arquitetura-de-Navegacao-e-Funcoes.md) | Mapa dos ambientes, menus, níveis de função e permissões. |
 
 Leia também [PROJECT_RULES.md](PROJECT_RULES.md) antes de propor ou alterar código.
 

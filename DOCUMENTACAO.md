@@ -49,6 +49,8 @@ A experiência de campo prioriza técnicos, operadores e líderes em ambiente in
 
 O frontend deve evoluir a partir de um design system NETSECBR único. Antes de novos módulos, a interface deve consolidar shell de aplicação, agrupamento de navegação, ações, tabelas, formulários, badges, modais, estados vazios e hierarquia de páginas. Nenhum módulo deve criar padrões visuais isolados.
 
+A arquitetura de navegação detalhada está em `documentação/22-Arquitetura-de-Navegacao-e-Funcoes.md`. Ela é a referência para separar o Command Center global, as Operações de Manutenção de cada tenant e a camada de Governança e Performance.
+
 ## Padrões
 
 - Produto modular e SaaS, sem personalizações que alterem o núcleo.

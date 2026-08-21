@@ -52,3 +52,4 @@ Todas as mudanças relevantes do projeto serão registradas aqui.
 - Consulta ao catálogo oficial de ABB, KUKA, FANUC e Yaskawa a partir da requisição, aberta em janela separada para preservar o contexto da OS.
 - Documentada a separação entre NETSECBR Command Center, Operações de Manutenção e a futura camada de Governança e Performance.
 - Documentadas as diretrizes de experiência de campo, app Android em Flutter e ditado com transcrição temporária, revisão humana e descarte do áudio.
+- Documentada a arquitetura hierárquica de navegação do Command Center, Operações de Manutenção e Governança e Performance, com mapa visual salvo no repositório.
