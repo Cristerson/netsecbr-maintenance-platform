@@ -27,6 +27,12 @@
 - Como gestor, quero visualizar pendências e atrasos para agir rapidamente.
 - Como diretoria, quero acompanhar ocorrências e esforço de manutenção por filtro.
 
+## Épico 6 — Manual de Operação do MVP V1
+
+- Como usuário operacional, quero um manual com telas e passos para executar cada rotina sem depender de orientação informal.
+- Como administrador, quero conhecer dependências, permissões e impactos de cada ação antes de executá-la.
+- Como responsável pela implantação, quero validar o resultado esperado e os erros comuns de cada fluxo do MVP.
+
 ## Critério de priorização
 
 Priorizar primeiro o que permite operar uma OS ponta a ponta com rastreabilidade. Itens IIoT, IA, estoque, compras e integrações entram após validação do MVP com usuários reais.

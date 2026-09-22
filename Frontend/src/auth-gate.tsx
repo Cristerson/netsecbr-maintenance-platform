@@ -230,15 +230,5 @@ const permissions = (grantedPermissions ?? []).map(
     <button type="button" className="auth-link" onClick={() => { setMode('sign-in'); setMessage(''); }}>Voltar para o login</button>
   </form></main>;
 
-  return <main className="auth-screen"><form className="auth-card" onSubmit={signIn}>
-    <img src="/brand/logo_netsecbr.png" alt="NETSECBR" />
-    <p className="eyebrow">MAINTENANCE PLATFORM</p>
-    <h1>Acesse sua operação</h1>
-    <p>Entre com seu e-mail corporativo para continuar.</p>
-    <label className="field"><span>E-mail</span><input type="email" value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="email" required /></label>
-    <label className="field"><span>Senha</span><span className="password-field"><input type={isPasswordVisible ? 'text' : 'password'} value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="current-password" required /><button type="button" className="password-toggle" onClick={() => setIsPasswordVisible((visible) => !visible)} aria-label={isPasswordVisible ? 'Ocultar senha' : 'Mostrar senha'}>{isPasswordVisible ? <EyeOff size={18} /> : <Eye size={18} />}</button></span></label>
-    {message && <p className="auth-message" role="alert">{message}</p>}
-    <button className="primary submit" disabled={isSubmitting}>{isSubmitting ? 'Entrando…' : 'Entrar na plataforma'}</button>
-    <button type="button" className="auth-link" onClick={() => { setMode('forgot-password'); setMessage(''); }}>Esqueci minha senha</button>
-  </form></main>;
+  return <main className="auth-screen"><section className="auth-mascot-area" aria-hidden="true"><img src="/brand/marv-mascot-v1.png" alt="" className="auth-mascot-large" /></section><section className="auth-login-area"><span className="auth-diamond auth-diamond-one" /><span className="auth-diamond auth-diamond-two" /><span className="auth-diamond auth-diamond-three" /><form className="auth-card auth-login-card" onSubmit={signIn}><div className="auth-product-name"><p>M.A.R.V.</p><span>Maintenance &amp; Automation Robotic Verification</span></div><h1>Entre com suas credenciais</h1><label className="field"><span>E-mail</span><input type="email" value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="email" required /></label><label className="field"><span>Senha</span><span className="password-field"><input type={isPasswordVisible ? 'text' : 'password'} value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="current-password" required /><button type="button" className="password-toggle" onClick={() => setIsPasswordVisible((visible) => !visible)} aria-label={isPasswordVisible ? 'Ocultar senha' : 'Mostrar senha'}>{isPasswordVisible ? <EyeOff size={18} /> : <Eye size={18} />}</button></span></label>{message && <p className="auth-message" role="alert">{message}</p>}<button className="primary submit" disabled={isSubmitting}>{isSubmitting ? 'Entrando…' : 'Entrar'}</button><button type="button" className="auth-link" onClick={() => { setMode('forgot-password'); setMessage(''); }}>Esqueci minha senha</button></form></section></main>;
 }

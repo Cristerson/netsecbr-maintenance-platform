@@ -97,6 +97,7 @@ export function AssetAdmin({ tenantId, canManage }: Props) {
   const [form, setForm] = useState(emptyForm);
   const [message, setMessage] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
+  const isDetailView = isFormOpen && editingAsset !== null;
 
   const loadData = useCallback(async () => {
     setIsLoading(true);
@@ -357,6 +358,8 @@ export function AssetAdmin({ tenantId, canManage }: Props) {
       setErrorMessage(`Não foi possível excluir o ativo: ${error.message}`);
     } else {
       setMessage('Ativo excluído com sucesso.');
+      setIsFormOpen(false);
+      setEditingAsset(null);
       await loadData();
     }
 
@@ -375,8 +378,8 @@ export function AssetAdmin({ tenantId, canManage }: Props) {
     );
   }
   return (
-    <div>
-      <div className="user-admin-actions">
+    <section className="content asset-admin">
+      {!isDetailView && <div className="user-admin-actions">
         <div className="asset-search">
           <input
             value={search}
@@ -397,11 +400,7 @@ export function AssetAdmin({ tenantId, canManage }: Props) {
           </button>
         )}
 
-        <button
-          className="secondary button-with-icon"
-          onClick={() => void loadData()}
-          disabled={isLoading || isSaving}
-        >        {canManage && (
+        {canManage && (
           <button
             className="secondary button-with-icon"
             onClick={() => setIsCategoryAdminOpen(true)}
@@ -411,10 +410,16 @@ export function AssetAdmin({ tenantId, canManage }: Props) {
             Categorias
           </button>
         )}
+
+        <button
+          className="secondary button-with-icon"
+          onClick={() => void loadData()}
+          disabled={isLoading || isSaving}
+        >
           <RefreshCw size={17} />
           Atualizar lista
         </button>
-      </div>
+      </div>}
 
       {message && <p className="success-message">{message}</p>}
       {errorMessage && <p className="error-message">{errorMessage}</p>}
@@ -424,17 +429,17 @@ export function AssetAdmin({ tenantId, canManage }: Props) {
           <div className="panel-head">
             <div>
               <p className="eyebrow">CADASTRO DE ATIVO</p>
-              <h2>{editingAsset ? 'Editar ativo' : 'Novo ativo'}</h2>
+              <h2>{editingAsset ? `Ativo: ${editingAsset.name}` : 'Novo ativo'}</h2>
             </div>
 
             <button
               type="button"
-              className="secondary icon-action"
-              title="Cancelar"
-              aria-label="Cancelar"
+              className="secondary"
+              title={editingAsset ? 'Voltar para ativos' : 'Cancelar'}
+              aria-label={editingAsset ? 'Voltar para ativos' : 'Cancelar'}
               onClick={() => setIsFormOpen(false)}
             >
-              <X size={18} />
+              {editingAsset ? 'Voltar para ativos' : <X size={18} />}
             </button>
           </div>
 
@@ -619,6 +624,26 @@ export function AssetAdmin({ tenantId, canManage }: Props) {
           </div>
 
           <div className="form-actions">
+            {editingAsset && (
+              <>
+                <button
+                  type="button"
+                  className="secondary"
+                  disabled={isSaving}
+                  onClick={() => void toggleAssetStatus(editingAsset)}
+                >
+                  {editingAsset.status === 'active' ? 'Desativar ativo' : 'Ativar ativo'}
+                </button>
+                <button
+                  type="button"
+                  className="secondary asset-delete"
+                  disabled={isSaving}
+                  onClick={() => void deleteAsset(editingAsset)}
+                >
+                  Excluir ativo
+                </button>
+              </>
+            )}
             <button type="submit" disabled={isSaving} className="button-with-icon">
               {isSaving ? 'Salvando...' : 'Salvar ativo'}
             </button>
@@ -634,7 +659,7 @@ export function AssetAdmin({ tenantId, canManage }: Props) {
         </form>
       )}
 
-      <article className="panel table">
+      {!isDetailView && <article className="panel table">
         <div className="table-head asset-table-head">
           <span>ATIVO</span>
           <span>CATEGORIA</span>
@@ -642,7 +667,6 @@ export function AssetAdmin({ tenantId, canManage }: Props) {
           <span>CENTRO DE CUSTO</span>
           <span>CRITICIDADE</span>
           <span>STATUS</span>
-          {canManage && <span>AÇÕES</span>}
         </div>
 
         {isLoading && (
@@ -661,7 +685,13 @@ export function AssetAdmin({ tenantId, canManage }: Props) {
           filteredAssets.map((asset) => (
             <div className="table-row asset-table-row" key={asset.id}>
               <div>
-                <strong>{asset.name}</strong>
+                <button
+                  type="button"
+                  className="work-order-link"
+                  onClick={() => openEditAsset(asset)}
+                >
+                  {asset.name}
+                </button>
                 <small>
                   {asset.code}
                   {asset.manufacturer ? ` · ${asset.manufacturer}` : ''}
@@ -692,50 +722,9 @@ export function AssetAdmin({ tenantId, canManage }: Props) {
                 </span>
               </span>
 
-              {canManage && (
-                <span className="asset-actions">
-                  <button
-                    className="secondary icon-action"
-                    disabled={isSaving}
-                    title="Editar ativo"
-                    aria-label={`Editar ativo ${asset.name}`}
-                    onClick={() => openEditAsset(asset)}
-                  >
-                    <Pencil size={18} />
-                  </button>
-
-                  <button
-                    className="secondary icon-action"
-                    disabled={isSaving}
-                    title={
-                      asset.status === 'active'
-                        ? 'Desativar ativo'
-                        : 'Ativar ativo'
-                    }
-                    aria-label={
-                      asset.status === 'active'
-                        ? `Desativar ativo ${asset.name}`
-                        : `Ativar ativo ${asset.name}`
-                    }
-                    onClick={() => void toggleAssetStatus(asset)}
-                  >
-                    <Power size={18} />
-                  </button>
-
-                  <button
-                    className="secondary icon-action asset-delete"
-                    disabled={isSaving}
-                    title="Excluir ativo"
-                    aria-label={`Excluir ativo ${asset.name}`}
-                    onClick={() => void deleteAsset(asset)}
-                  >
-                    <Trash2 size={18} />
-                  </button>
-                </span>
-              )}
             </div>
           ))}
-      </article>
-    </div>
+      </article>}
+    </section>
   );
 }

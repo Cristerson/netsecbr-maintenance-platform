@@ -50,6 +50,11 @@ export function UserAdmin({ tenantId, currentName, currentRole }: Props) {
   const [isSaving, setIsSaving] = useState(false);
   const [message, setMessage] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
+  const [isPasswordResetOpen, setIsPasswordResetOpen] = useState(false);
+  const [temporaryPasswordMode, setTemporaryPasswordMode] = useState<'generated' | 'manual'>('generated');
+  const [manualTemporaryPassword, setManualTemporaryPassword] = useState('');
+  const [issuedTemporaryPassword, setIssuedTemporaryPassword] = useState('');
+  const isDetailView = selectedMember !== null;
 const [isCreateFormOpen, setIsCreateFormOpen] = useState(false);
 const [isCreatingUser, setIsCreatingUser] = useState(false);
 const [newUser, setNewUser] = useState({
@@ -132,6 +137,8 @@ const [newUser, setNewUser] = useState({
     setSelectedMember(member);
     setMessage('');
     setErrorMessage('');
+    setIsPasswordResetOpen(false);
+    setIssuedTemporaryPassword('');
 
     const { data, error } = await supabase
       .from('membership_permissions')
@@ -160,33 +167,39 @@ const [newUser, setNewUser] = useState({
       setErrorMessage(`Não foi possível atualizar o usuário: ${error.message}`);
     } else {
       setMessage(`Usuário ${member.is_active ? 'desativado' : 'ativado'} com sucesso.`);
+      setSelectedMember((current) =>
+        current?.id === member.id
+          ? { ...current, is_active: !member.is_active }
+          : current,
+      );
       await loadData();
     }
 
     setIsSaving(false);
   }
-  async function requestPasswordReset(member: Membership) {
-    const confirmed = window.confirm(
-      `Enviar um e-mail para redefinição de senha para ${getMemberName(member)}?`,
-    );
+  async function setTemporaryPassword(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selectedMember) return;
 
-    if (!confirmed) return;
+    if (temporaryPasswordMode === 'manual' && manualTemporaryPassword.length < 12) {
+      setErrorMessage('A senha temporária deve ter pelo menos 12 caracteres.');
+      return;
+    }
 
     setIsSaving(true);
     setMessage('');
     setErrorMessage('');
+    setIssuedTemporaryPassword('');
 
-    const { error } = await supabase.functions.invoke(
-      'manage-tenant-password',
-      {
-        body: {
-          action: 'request',
-          tenantId,
-          userId: member.user_id,
-          redirectTo: window.location.origin,
-        },
+    const { data, error } = await supabase.functions.invoke('manage-tenant-password', {
+      body: {
+        action: 'set_temporary',
+        tenantId,
+        userId: selectedMember.user_id,
+        mode: temporaryPasswordMode,
+        ...(temporaryPasswordMode === 'manual' ? { password: manualTemporaryPassword } : {}),
       },
-    );
+    });
 
     if (error) {
       let detail = error.message;
@@ -196,11 +209,15 @@ const [newUser, setNewUser] = useState({
         detail = responseBody.error ?? detail;
       }
 
-      setErrorMessage(`Não foi possível enviar a redefinição de senha: ${detail}`);
+      setErrorMessage(`Não foi possível redefinir a senha: ${detail}`);
     } else {
-      setMessage(
-        `E-mail de redefinição de senha enviado para ${getMemberName(member)}.`,
-      );
+      const password = temporaryPasswordMode === 'generated'
+        ? String(data?.temporaryPassword ?? '')
+        : manualTemporaryPassword;
+
+      setIssuedTemporaryPassword(password);
+      setMessage(`Senha temporária definida para ${getMemberName(selectedMember)}.`);
+      setManualTemporaryPassword('');
     }
 
     setIsSaving(false);
@@ -282,7 +299,7 @@ async function createUser(event: FormEvent<HTMLFormElement>) {
 }
   return (
     <div>
-      <div className="user-admin-actions">
+      {!isDetailView && <div className="user-admin-actions">
   <button
   className="button-with-icon"
   onClick={() => {
@@ -303,7 +320,7 @@ async function createUser(event: FormEvent<HTMLFormElement>) {
   <RefreshCw size={17} />
   Atualizar lista
 </button>
-</div>
+</div>}
 
     
 
@@ -395,7 +412,12 @@ autoComplete="new-password"
     </div>
   </form>
 )}
-      <div className="table">
+      {!isDetailView && <div className="panel table client-user-table">
+        <div className="table-head client-user-table-head">
+          <span>USUÁRIO</span>
+          <span>PERFIL</span>
+          <span>STATUS</span>
+        </div>
         <p className="authenticated-user">
   Sessão atual: <strong>{currentName}</strong> — {formatRole(currentRole)}
 </p>
@@ -418,43 +440,25 @@ autoComplete="new-password"
 >
   
               <div>
-                <strong>{getMemberName(member)}</strong>
+                <button
+                  type="button"
+                  className="work-order-link"
+                  onClick={() => void selectMember(member)}
+                >
+                  {getMemberName(member)}
+                </button>
                 <small>{formatRole(member.role)}</small>
               </div>
-
-              <button
-              className="secondary icon-action"
-              disabled={isSaving}
-              title={member.is_active ? 'Desativar usuário' : 'Ativar usuário'}
-              aria-label={member.is_active ? 'Desativar usuário' : 'Ativar usuário'}
-              onClick={() => void toggleActive(member)}
-            >
-              <Power size={18} />
-            </button>
-              <button
-                className="secondary icon-action"
-                disabled={isSaving || !member.is_active}
-                title="Enviar e-mail para redefinir senha"
-                aria-label="Enviar e-mail para redefinir senha"
-                onClick={() => void requestPasswordReset(member)}
-              >
-                <LockKeyhole  size={18} />
-              </button>
-              <button
-                className="secondary icon-action"
-                disabled={isSaving}
-                title="Gerenciar permissões"
-                aria-label="Gerenciar permissões"
-                onClick={() => void selectMember(member)}
-              >
-                <KeyRound size={18} />
-              </button>
+              <span>{formatRole(member.role)}</span>
+              <span className={`badge ${member.is_active ? 'asset-status-active' : 'asset-status-inactive'}`}>
+                {member.is_active ? 'Ativo' : 'Inativo'}
+              </span>
             </div>
           ))}
-      </div>
+      </div>}
 
       {selectedMember && (
-        <section className="panel">
+        <section className="panel admin-record-detail">
           <div className="panel-head">
             <div>
               <p className="eyebrow">PERMISSÕES DO USUÁRIO</p>
@@ -462,9 +466,108 @@ autoComplete="new-password"
             </div>
 
             <button className="secondary" onClick={() => setSelectedMember(null)}>
-              Fechar
+              Voltar para usuários
             </button>
           </div>
+
+          <div className="form-actions admin-record-actions">
+            <button
+              type="button"
+              className="secondary button-with-icon"
+              disabled={isSaving}
+              onClick={() => void toggleActive(selectedMember)}
+            >
+              <Power size={16} />
+              {selectedMember.is_active ? 'Desativar usuário' : 'Ativar usuário'}
+            </button>
+            <button
+              type="button"
+              className="secondary button-with-icon"
+              disabled={isSaving || !selectedMember.is_active}
+              onClick={() => {
+                setIsPasswordResetOpen((current) => !current);
+                setTemporaryPasswordMode('generated');
+                setManualTemporaryPassword('');
+                setIssuedTemporaryPassword('');
+                setMessage('');
+                setErrorMessage('');
+              }}
+            >
+              <LockKeyhole size={16} />
+              Redefinir senha
+            </button>
+            <span className="admin-record-permission-label">
+              <KeyRound size={16} /> Permissões do usuário
+            </span>
+          </div>
+
+          {isPasswordResetOpen && selectedMember.is_active && (
+            <form className="new-user-form panel" onSubmit={setTemporaryPassword}>
+              <div className="panel-head">
+                <div>
+                  <p className="eyebrow">SENHA TEMPORÁRIA</p>
+                  <h3>Redefinir acesso de {getMemberName(selectedMember)}</h3>
+                </div>
+              </div>
+
+              <label className="field">
+                <span>Como definir a senha temporária?</span>
+                <select
+                  value={temporaryPasswordMode}
+                  disabled={isSaving || Boolean(issuedTemporaryPassword)}
+                  onChange={(event) => setTemporaryPasswordMode(event.target.value as 'generated' | 'manual')}
+                >
+                  <option value="generated">MARV gera uma senha forte</option>
+                  <option value="manual">Definir uma senha temporária</option>
+                </select>
+              </label>
+
+              {temporaryPasswordMode === 'manual' && !issuedTemporaryPassword && (
+                <label className="field">
+                  <span>Senha temporária (mínimo de 12 caracteres)</span>
+                  <input
+                    type="password"
+                    minLength={12}
+                    required
+                    autoComplete="new-password"
+                    value={manualTemporaryPassword}
+                    onChange={(event) => setManualTemporaryPassword(event.target.value)}
+                  />
+                </label>
+              )}
+
+              {issuedTemporaryPassword && (
+                <label className="field">
+                  <span>Copie e entregue esta senha agora. Ela não será exibida novamente.</span>
+                  <input type="text" readOnly value={issuedTemporaryPassword} onFocus={(event) => event.currentTarget.select()} />
+                </label>
+              )}
+
+              <p className="authenticated-user">
+                No próximo acesso, o usuário deverá cadastrar uma nova senha antes de usar a plataforma.
+              </p>
+
+              <div className="form-actions">
+                {!issuedTemporaryPassword && (
+                  <button type="submit" disabled={isSaving}>
+                    {isSaving ? 'Redefinindo...' : 'Definir senha temporária'}
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className="secondary"
+                  disabled={isSaving}
+                  onClick={() => {
+                    setIsPasswordResetOpen(false);
+                    setManualTemporaryPassword('');
+                    setIssuedTemporaryPassword('');
+                  }}
+                >
+                  {issuedTemporaryPassword ? 'Concluído' : 'Cancelar'}
+                </button>
+              </div>
+            </form>
+          )}
 
           {permissions.map((permission) => (
             <label className="permission-option" key={permission.code}>

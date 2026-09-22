@@ -4,7 +4,9 @@ import {
   AlertTriangle,
   ArrowRight,
   Bell,
+  Building2,
   Box,
+  CalendarClock,
   ClipboardList,
   Factory,
   LayoutDashboard,
@@ -12,7 +14,6 @@ import {
   Menu,
   Plus,
   Search,
-  ShoppingCart,
   Wrench,
   X,
 } from 'lucide-react';
@@ -20,6 +21,7 @@ import { AuthGate, type CurrentAccount } from './auth-gate';
 import {
   type OperationalAsset as Asset,
   type OperationalWorkOrder as WorkOrder,
+  type UpcomingPreventivePlan,
   useOperationalData,
 } from './use-operational-data';
 import { AssetAdmin } from './asset-admin';
@@ -32,6 +34,7 @@ import { OrganizationAdmin } from './organization-admin';
 import { BrandingAdmin } from './branding-admin';
 import { FinanceAdmin } from './finance-admin';
 import { PurchaseManagement } from './purchase-management';
+import { PreventivePlanAdmin } from './preventive-plan-admin';
 import './styles.css';
 import './brand.css';
 import './auth.css';
@@ -46,12 +49,27 @@ function Badge({ children }: { children: string }) {
 
 function App({ account }: { account: CurrentAccount }) {
   const [page, setPage] = useState<
-    'dashboard' | 'assets' | 'requests' | 'orders' | 'purchases' | 'client_admin' | 'netsecbr_admin'
+    | 'dashboard'
+    | 'assets'
+    | 'requests'
+    | 'orders'
+    | 'preventive_plans'
+    | 'purchases'
+    | 'client_admin'
+    | 'netsecbr_admin'
   >('dashboard');
   const [menuOpen, setMenuOpen] = useState(false);
-  const { assets, orders, isLoading, error } = useOperationalData(account.tenantId);
+  const { assets, orders, overduePreventivePlans, upcomingPreventivePlans, isLoading, error, reload: reloadOperationalData } = useOperationalData(account.tenantId);
   const [search, setSearch] = useState('');
   const [clientAdminNavigationSignal, setClientAdminNavigationSignal] = useState(0);
+
+  // Recarrega os dados operacionais toda vez que a Visão geral é aberta,
+  // inclusive ao voltar de Preventivas (sem polling e sem Realtime).
+  useEffect(() => {
+    if (page === 'dashboard') {
+      void reloadOperationalData();
+    }
+  }, [page, reloadOperationalData]);
 
 
      const nav = [
@@ -59,8 +77,8 @@ function App({ account }: { account: CurrentAccount }) {
     { id: 'assets', label: 'Ativos', icon: Box },
     { id: 'requests', label: 'Solicitações', icon: AlertTriangle },
     { id: 'orders', label: 'Ordens de serviço', icon: ClipboardList },
-    { id: 'purchases', label: 'Compras', icon: ShoppingCart },
-    { id: 'client_admin', label: 'Administração do cliente', icon: Factory },
+    { id: 'preventive_plans', label: 'Preventivas', icon: CalendarClock },
+    { id: 'client_admin', label: 'Configurações', icon: Factory },
     { id: 'netsecbr_admin', label: 'Control Center NETSECBR', icon: Wrench },
   ] as const;
 
@@ -91,13 +109,15 @@ function App({ account }: { account: CurrentAccount }) {
         canAccess('work_orders.execute')
       );
     }
-    if (id === 'purchases') {
+    if (id === 'preventive_plans') {
       return (
-        canAccess('purchase_requests.read') ||
-        canAccess('purchase_requests.create') ||
-        canAccess('purchase_requests.approve')
+        canAccess('assets.read') ||
+        canAccess('assets.manage') ||
+        canAccess('work_orders.read') ||
+        canAccess('work_orders.create')
       );
     }
+
     if (id === 'client_admin') {
       return account.isTenantAdmin || account.isNetsecbrAdmin;
     }
@@ -118,7 +138,7 @@ function App({ account }: { account: CurrentAccount }) {
           </div>
 
           <div>
-            <small>MAINTENANCE PLATFORM</small>
+            <small>MARV PLATFORM</small>
           </div>
 
           <button className="mobile-close" onClick={() => setMenuOpen(false)}>
@@ -186,8 +206,10 @@ function App({ account }: { account: CurrentAccount }) {
             <p className="eyebrow">
               {page === 'dashboard'
                 ? 'GESTÃO DE MANUTENÇÃO'
-                : page === 'client_admin' || page === 'netsecbr_admin'
-                  ? 'ADMINISTRAÇÃO DA PLATAFORMA'
+                : page === 'client_admin'
+                  ? 'MARV'
+                  : page === 'netsecbr_admin'
+                    ? 'ADMINISTRAÇÃO DA PLATAFORMA'
                   : 'GESTÃO DE MANUTENÇÃO'}
             </p>
 
@@ -200,10 +222,12 @@ function App({ account }: { account: CurrentAccount }) {
                     ? 'Solicitações de manutenção'
                     : page === 'orders'
                       ? 'Ordens de serviço'
+                      : page === 'preventive_plans'
+                        ? 'Planos preventivos'
                     : page === 'purchases'
                    ? 'Compras'
                       : page === 'client_admin'
-                        ? 'Administração do Cliente'
+                        ? 'Configurações'
                         : 'Control Center NETSECBR'}
             </h1>
           </div>
@@ -231,7 +255,10 @@ function App({ account }: { account: CurrentAccount }) {
           <Dashboard
             assets={assets}
             orders={orders}
+            overduePreventivePlans={overduePreventivePlans}
+            upcomingPreventivePlans={upcomingPreventivePlans}
             onOpenOrders={() => setPage('orders')}
+            onOpenPreventivePlans={() => setPage('preventive_plans')}
           />
         )}
 
@@ -267,6 +294,12 @@ function App({ account }: { account: CurrentAccount }) {
             }
           />
         )}
+        {!isLoading && page === 'preventive_plans' && (
+          <PreventivePlanAdmin
+            tenantId={account.tenantId}
+            canManage={account.isTenantAdmin || account.isNetsecbrAdmin}
+          />
+        )}
         {!isLoading && page === 'purchases' && (
           <PurchaseManagement
             tenantId={account.tenantId}
@@ -282,13 +315,12 @@ function App({ account }: { account: CurrentAccount }) {
           <AdminPanel
             account={account}
             navigationSignal={clientAdminNavigationSignal}
-            title="Administração do Cliente"
+            title="Configurações"
             cards={[
               'Usuários e permissões',
               'Identidade visual',
               'Painel Financeiro',
-              'Unidades e centros de custo',
-              'Fornecedores',
+              'Cadastros',
               'Integrações e importações',
             ]}
           />
@@ -310,19 +342,60 @@ function App({ account }: { account: CurrentAccount }) {
   );
 }
 
+// Data local do usuário no formato YYYY-MM-DD, comparável com a coluna date.
+function getLocalTodayIso() {
+  const now = new Date();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+
+  return `${now.getFullYear()}-${month}-${day}`;
+}
+
+function formatDashboardDate(value: string) {
+  const [year, month, day] = value.split('-');
+
+  if (!year || !month || !day) return value;
+
+  return `${day}/${month}/${year}`;
+}
+
+// Rótulo relativo da próxima execução: Atrasada, Hoje, Amanhã ou "Em X dias".
+function getPreventiveRelativeLabel(nextDueDate: string) {
+  const today = getLocalTodayIso();
+
+  if (nextDueDate < today) return 'Atrasada';
+
+  const [todayYear, todayMonth, todayDay] = today.split('-').map(Number);
+  const [dueYear, dueMonth, dueDay] = nextDueDate.split('-').map(Number);
+  const diffDays = Math.round(
+    (Date.UTC(dueYear, dueMonth - 1, dueDay) - Date.UTC(todayYear, todayMonth - 1, todayDay)) / 86400000,
+  );
+
+  if (diffDays === 0) return 'Hoje';
+  if (diffDays === 1) return 'Amanhã';
+
+  return `Em ${diffDays} dias`;
+}
+
 function Dashboard({
   assets,
   orders,
+  overduePreventivePlans,
+  upcomingPreventivePlans,
   onOpenOrders,
+  onOpenPreventivePlans,
 }: {
   assets: Asset[];
   orders: WorkOrder[];
+  overduePreventivePlans: number;
+  upcomingPreventivePlans: UpcomingPreventivePlan[];
   onOpenOrders: () => void;
+  onOpenPreventivePlans: () => void;
 }) {
   const critical = orders.filter((order) => order.priority === 'Crítica').length;
 
   return (
-    <section className="content">
+    <section className="content admin-panel">
       <div className="quick">
         <button className="primary" onClick={onOpenOrders}>
           <Plus size={18} />
@@ -340,10 +413,16 @@ function Dashboard({
 
         <Metric
           label="Preventivas atrasadas"
-          value="—"
-          trend="Indicador em breve"
+          value={String(overduePreventivePlans)}
+          trend={
+            overduePreventivePlans === 0
+              ? 'Nenhuma preventiva atrasada'
+              : overduePreventivePlans === 1
+                ? '1 plano requer atenção'
+                : `${overduePreventivePlans} planos requerem atenção`
+          }
           icon={<AlertTriangle />}
-          warn
+          warn={overduePreventivePlans > 0}
         />
 
         <Metric
@@ -407,21 +486,40 @@ function Dashboard({
         <article className="panel">
           <div className="panel-head">
             <div>
-              <p className="eyebrow">PRÓXIMAS ENTREGAS</p>
-              <h2>Indicadores operacionais</h2>
+              <p className="eyebrow">MANUTENÇÃO PREVENTIVA</p>
+              <h2>Próximas preventivas</h2>
             </div>
+
+            <button onClick={onOpenPreventivePlans}>
+              Ver preventivas <ArrowRight size={16} />
+            </button>
           </div>
 
-          <div className="insight">
-            <span>
-              <AlertTriangle size={18} />
-            </span>
+          {upcomingPreventivePlans.length === 0 && (
+            <p className="empty">Nenhuma preventiva programada.</p>
+          )}
 
-            <p>
-              Preventivas, disponibilidade e especialidades serão calculadas com
-              dados reais nas próximas entregas.
-            </p>
-          </div>
+          {upcomingPreventivePlans.map((plan) => {
+            const relativeLabel = getPreventiveRelativeLabel(plan.nextDueDate);
+
+            return (
+              <div className="order-row" key={plan.id}>
+                <div className="order-icon">
+                  <CalendarClock size={18} />
+                </div>
+
+                <div>
+                  <strong>{plan.name}</strong>
+                  <p>{plan.assetLabel}</p>
+                </div>
+
+                <div>
+                  <Badge>{relativeLabel}</Badge>
+                  <small>{formatDashboardDate(plan.nextDueDate)}</small>
+                </div>
+              </div>
+            );
+          })}
         </article>
       </div>
 
@@ -477,6 +575,17 @@ function AdminPanel({
 }) {
   const [selected, setSelected] = useState<string | null>(null);
   const lastNavigationSignal = useRef(navigationSignal);
+  const cardCategories: Record<string, string> = {
+    'Usuários e permissões': 'ACESSOS',
+    'Identidade visual': 'IDENTIDADE',
+    'Painel Financeiro': 'FINANCEIRO',
+    Cadastros: 'ESTRUTURA E PARCEIROS',
+    'Integrações e importações': 'INTEGRAÇÕES',
+    'Clientes e tenants': 'OPERAÇÃO',
+    'Planos e contratos': 'COMERCIAL',
+    'Financeiro NETSECBR': 'FINANCEIRO',
+    'Suporte e auditoria': 'GOVERNANÇA',
+  };
 
   useEffect(() => {
     if (lastNavigationSignal.current === navigationSignal) return;
@@ -487,39 +596,40 @@ function AdminPanel({
 
   return (
     <section className="content">
-      <div className="section-top">
-        <p>{title}</p>
-      </div>
-
       {!selected && (
-        <div className="metrics">
+        <div className="admin-module-grid">
           {cards.map((card) => (
             <button
-              className="metric"
+              className="admin-module-card"
               key={card}
               onClick={() => setSelected(card)}
             >
               <div className="metric-icon">
                 <Wrench />
               </div>
-              <p>ADMINISTRAÇÃO</p>
+              <p>{cardCategories[card] ?? 'CONFIGURAÇÕES'}</p>
               <h2>{card}</h2>
-              <small>Abrir módulo</small>
+              <small>Abrir módulo →</small>
             </button>
           ))}
         </div>
       )}
 
       {selected && (
-        <article className="panel">
-          <div className="panel-head">
-            <div>
-              <p className="eyebrow">{title.toUpperCase()}</p>
-              <h2>{selected}</h2>
-            </div>
+        <section className="admin-module-detail">
+          {/* Cadastros tem dois níveis e monta o próprio cabeçalho. */}
+          {selected !== 'Cadastros' && (
+            <div className="admin-module-header">
+              <div>
+                <p className="eyebrow">{title.toUpperCase()}</p>
+                <h2>{selected}</h2>
+              </div>
 
-            <button onClick={() => setSelected(null)}>Voltar</button>
-          </div>
+              <button className="secondary" onClick={() => setSelected(null)}>
+                Voltar para configurações
+              </button>
+            </div>
+          )}
 
          {selected === 'Usuários e permissões' && account ? (
   <UserAdmin tenantId={account.tenantId} account={account} />
@@ -527,10 +637,11 @@ function AdminPanel({
   <BrandingAdmin tenantId={account.tenantId} />
 ) : selected === 'Painel Financeiro' && account ? (
   <FinanceAdmin tenantId={account.tenantId} />
-) : selected === 'Fornecedores' && account ? (
-  <SupplierAdminModule tenantId={account.tenantId} />
-) : selected === 'Unidades e centros de custo' && account ? (
-  <OrganizationAdmin tenantId={account.tenantId} />
+) : selected === 'Cadastros' && account ? (
+  <RegistryAdmin
+    tenantId={account.tenantId}
+    onBackToSettings={() => setSelected(null)}
+  />
 ) : selected === 'Integrações e importações' ? (
             <div className="insight">
               <span>
@@ -543,9 +654,83 @@ function AdminPanel({
           ) : (
             <p>Este módulo será conectado aos dados reais na próxima etapa.</p>
           )}
-        </article>
+        </section>
       )}
     </section>
+  );
+}
+
+function RegistryAdmin({
+  tenantId,
+  onBackToSettings,
+}: {
+  tenantId: string;
+  onBackToSettings: () => void;
+}) {
+  const [selectedModule, setSelectedModule] = useState<'organization' | 'suppliers' | null>(null);
+
+  const subModuleTitles = {
+    organization: 'Unidades e centros de custo',
+    suppliers: 'Fornecedores',
+  } as const;
+
+  if (selectedModule) {
+    return (
+      <section className="admin-registry-content">
+        <div className="admin-module-header">
+          <div>
+            <p className="eyebrow">CONFIGURAÇÕES · CADASTROS</p>
+            <h2>{subModuleTitles[selectedModule]}</h2>
+          </div>
+
+          <div className="admin-module-header-actions">
+            <button className="secondary" onClick={() => setSelectedModule(null)}>
+              Voltar para cadastros
+            </button>
+
+            <button className="secondary" onClick={onBackToSettings}>
+              Voltar para configurações
+            </button>
+          </div>
+        </div>
+
+        {selectedModule === 'organization' ? (
+          <OrganizationAdmin tenantId={tenantId} />
+        ) : (
+          <SupplierAdminModule tenantId={tenantId} />
+        )}
+      </section>
+    );
+  }
+
+  return (
+    <>
+      <div className="admin-module-header">
+        <div>
+          <p className="eyebrow">CONFIGURAÇÕES</p>
+          <h2>Cadastros</h2>
+        </div>
+
+        <button className="secondary" onClick={onBackToSettings}>
+          Voltar para configurações
+        </button>
+      </div>
+
+      <div className="admin-registry-grid">
+        <button className="admin-module-card" onClick={() => setSelectedModule('organization')}>
+          <div className="metric-icon"><Factory /></div>
+          <p>ESTRUTURA</p>
+          <h2>Unidades e centros de custo</h2>
+          <small>Organizar a operação →</small>
+        </button>
+        <button className="admin-module-card" onClick={() => setSelectedModule('suppliers')}>
+          <div className="metric-icon"><Building2 /></div>
+          <p>PARCEIROS</p>
+          <h2>Fornecedores</h2>
+          <small>Gerenciar fornecedores →</small>
+        </button>
+      </div>
+    </>
   );
 }
 

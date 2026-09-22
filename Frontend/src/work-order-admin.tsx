@@ -2,14 +2,12 @@ import { type FormEvent, useCallback, useEffect, useState } from 'react';
 import {
   CheckCircle2,
   ClipboardList,
-  PackagePlus,
   Pencil,
   Plus,
   RefreshCw,
   X,
 } from 'lucide-react';
 import { supabase } from './supabase';
-import { PurchaseRequestAdmin } from './purchase-request-admin';
 
 type Props = {
   tenantId: string;
@@ -39,6 +37,29 @@ type WorkOrder = {
   opened_at: string;
   scheduled_for: string | null;
   completed_at: string | null;
+  diagnosis: string | null;
+  root_cause: string | null;
+  action_taken: string | null;
+  resolution_notes: string | null;
+  causes_equipment_downtime: boolean;
+  downtime_started_at: string | null;
+  downtime_ended_at: string | null;
+  diagnosis_category: string | null;
+  root_cause_category: string | null;
+  action_category: string | null;
+  recommendation_category: string | null;
+  reopened_at: string | null;
+  reopened_by: string | null;
+  reopen_reason: string | null;
+  cancelled_at: string | null;
+  cancelled_by: string | null;
+  cancellation_reason: string | null;
+  service_cost_cents: number | null;
+  material_cost_cents: number | null;
+  total_cost_cents: number;
+  estimated_service_cost_cents: number | null;
+  estimated_material_cost_cents: number | null;
+  estimated_total_cost_cents: number;
 };
 
 type WorkOrderRow = WorkOrder & {
@@ -102,6 +123,48 @@ const statusLabels: Record<WorkOrderStatus, string> = {
   cancelled: 'Cancelada',
 };
 
+const diagnosisCategories = [
+  'Falha mecanica / redutor / correia',
+  'Erro eletrico / servo / cablagem',
+  'Falha de comunicacao / rede industrial',
+  'Desvio de trajetoria / calibracao',
+  'Interrupcao de seguranca / periferico',
+  'Outro / em analise',
+];
+
+const rootCauseCategories = [
+  'Colisao / impacto fisico',
+  'Fadiga de material / vida util',
+  'Superaquecimento / sobrecarga',
+  'Programa / alteracao de logica',
+  'Contaminacao externa',
+  'Outro / em analise',
+];
+
+const actionCategories = [
+  'Mastering / calibracao de eixo',
+  'Troca de componente eletrico ou mecanico',
+  'Ajuste de programa / trajetoria',
+  'Limpeza e lubrificacao',
+  'Reset e reconfiguracao de parametros',
+  'Outro / em analise',
+];
+
+const recommendationCategories = [
+  'Liberado - acompanhamento preventivo',
+  'Liberado - reduzir velocidade ou carga temporariamente',
+  'Liberado - normalidade',
+  'Necessita treinamento de operacao',
+  'Aguardando peca ou atendimento do fabricante',
+  'Condenado / perda total',
+  'Outro / em analise',
+];
+
+const currencyFormatter = new Intl.NumberFormat('pt-BR', {
+  style: 'currency',
+  currency: 'BRL',
+});
+
 const emptyForm = {
   title: '',
   description: '',
@@ -113,6 +176,19 @@ const emptyForm = {
   asset_id: '',
   assigned_to: '',
   scheduled_for: '',
+  diagnosis: '',
+  root_cause: '',
+  action_taken: '',
+  resolution_notes: '',
+  causes_equipment_downtime: false,
+  downtime_started_at: '',
+  downtime_ended_at: '',
+  diagnosis_category: '',
+  root_cause_category: '',
+  action_category: '',
+  recommendation_category: '',
+  service_cost: '',
+  material_cost: '',
 };
 
 export function WorkOrderAdmin({
@@ -131,7 +207,6 @@ export function WorkOrderAdmin({
   const [isSaving, setIsSaving] = useState(false);
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [editingOrder, setEditingOrder] = useState<WorkOrder | null>(null);
-  const [purchaseOrder, setPurchaseOrder] = useState<WorkOrderRow | null>(null);
   const [form, setForm] = useState(emptyForm);
   const [message, setMessage] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
@@ -143,7 +218,7 @@ export function WorkOrderAdmin({
     const { data: ordersData, error: ordersError } = await supabase
       .from('work_orders')
       .select(
-        `id, order_number, tenant_id, unit_id, cost_center_id, asset_id, title, description, type, priority, status, opened_by, assigned_to, opened_at, scheduled_for, completed_at,
+        `id, order_number, tenant_id, unit_id, cost_center_id, asset_id, title, description, type, priority, status, opened_by, assigned_to, opened_at, scheduled_for, completed_at, diagnosis, root_cause, action_taken, resolution_notes, causes_equipment_downtime, downtime_started_at, downtime_ended_at, diagnosis_category, root_cause_category, action_category, recommendation_category, reopened_at, reopened_by, reopen_reason, cancelled_at, cancelled_by, cancellation_reason, service_cost_cents, material_cost_cents, total_cost_cents, estimated_service_cost_cents, estimated_material_cost_cents, estimated_total_cost_cents,
         assets(name),
         units(name),
         cost_centers(name),
@@ -247,6 +322,12 @@ export function WorkOrderAdmin({
     statusFilter === 'all' ? true : order.status === statusFilter,
   );
 
+  const isDetailView = isFormOpen && editingOrder !== null;
+
+  const formCostTotal =
+    (Number.isFinite(Number(form.service_cost)) ? Number(form.service_cost) : 0) +
+    (Number.isFinite(Number(form.material_cost)) ? Number(form.material_cost) : 0);
+
   const availableUnits = units.filter(
     (unit) => unit.is_active || unit.id === editingOrder?.unit_id,
   );
@@ -299,6 +380,29 @@ export function WorkOrderAdmin({
       asset_id: order.asset_id ?? '',
       assigned_to: order.assigned_to ?? '',
       scheduled_for: order.scheduled_for ? order.scheduled_for.slice(0, 16) : '',
+      diagnosis: order.diagnosis ?? '',
+      root_cause: order.root_cause ?? '',
+      action_taken: order.action_taken ?? '',
+      resolution_notes: order.resolution_notes ?? '',
+      causes_equipment_downtime: order.causes_equipment_downtime,
+      downtime_started_at: order.downtime_started_at
+        ? order.downtime_started_at.slice(0, 16)
+        : '',
+      downtime_ended_at: order.downtime_ended_at
+        ? order.downtime_ended_at.slice(0, 16)
+        : '',
+      diagnosis_category: order.diagnosis_category ?? '',
+      root_cause_category: order.root_cause_category ?? '',
+      action_category: order.action_category ?? '',
+      recommendation_category: order.recommendation_category ?? '',
+      service_cost:
+        order.service_cost_cents === null
+          ? ''
+          : (order.service_cost_cents / 100).toFixed(2),
+      material_cost:
+        order.material_cost_cents === null
+          ? ''
+          : (order.material_cost_cents / 100).toFixed(2),
     });
     setIsFormOpen(true);
   }
@@ -332,6 +436,81 @@ export function WorkOrderAdmin({
       return;
     }
 
+    if (form.causes_equipment_downtime && !form.downtime_started_at) {
+      setErrorMessage('Informe o início da parada do equipamento.');
+      return;
+    }
+
+    if (
+      form.downtime_started_at &&
+      form.downtime_ended_at &&
+      new Date(form.downtime_ended_at) < new Date(form.downtime_started_at)
+    ) {
+      setErrorMessage('O fim da parada não pode ser anterior ao início.');
+      return;
+    }
+
+    if (
+      (form.service_cost !== '' && (!Number.isFinite(Number(form.service_cost)) || Number(form.service_cost) < 0)) ||
+      (form.material_cost !== '' && (!Number.isFinite(Number(form.material_cost)) || Number(form.material_cost) < 0))
+    ) {
+      setErrorMessage('Informe valores validos para servicos e materiais.');
+      return;
+    }
+    const isBeingCompleted =
+      editingOrder &&
+      form.status === 'completed' &&
+      editingOrder.status !== 'completed';
+
+    if (
+      isBeingCompleted &&
+      (!form.diagnosis_category ||
+        !form.root_cause_category ||
+        !form.action_category ||
+        !form.recommendation_category)
+    ) {
+      setErrorMessage(
+        'Antes de concluir, informe o tipo de falha, a causa principal, a acao realizada e a recomendacao.',
+      );
+      return;
+    }
+
+    if (
+      isBeingCompleted &&
+      form.causes_equipment_downtime &&
+      !form.downtime_ended_at &&
+      form.recommendation_category !== 'Condenado / perda total'
+    ) {
+      setErrorMessage(
+        'Informe o fim da parada antes de concluir ou classifique a OS como condenado/perda total.',
+      );
+      return;
+    }
+
+    const isBeingCancelled =
+      editingOrder &&
+      editingOrder.status !== 'cancelled' &&
+      form.status === 'cancelled';
+
+    let cancellationReason: string | null = null;
+
+    if (isBeingCancelled) {
+      cancellationReason = window.prompt('Informe o motivo do cancelamento desta OS.')?.trim() || null;
+
+      if (!cancellationReason) {
+        setErrorMessage('O cancelamento exige um motivo informado pelo supervisor.');
+        return;
+      }
+    }
+
+    if (
+      isBeingCompleted &&
+      !window.confirm(
+        'Confirmar a conclusão desta OS? A data e hora atuais serão registradas como fechamento.',
+      )
+    ) {
+      return;
+    }
     setIsSaving(true);
     setMessage('');
     setErrorMessage('');
@@ -346,6 +525,25 @@ export function WorkOrderAdmin({
       asset_id: form.asset_id || null,
       assigned_to: form.assigned_to || null,
       scheduled_for: form.scheduled_for ? new Date(form.scheduled_for).toISOString() : null,
+      diagnosis: form.diagnosis.trim() || null,
+      root_cause: form.root_cause.trim() || null,
+      action_taken: form.action_taken.trim() || null,
+      resolution_notes: form.resolution_notes.trim() || null,
+      causes_equipment_downtime: form.causes_equipment_downtime,
+      downtime_started_at: form.downtime_started_at
+        ? new Date(form.downtime_started_at).toISOString()
+        : null,
+      downtime_ended_at: form.downtime_ended_at
+        ? new Date(form.downtime_ended_at).toISOString()
+        : null,
+      diagnosis_category: form.diagnosis_category || null,
+      root_cause_category: form.root_cause_category || null,
+      action_category: form.action_category || null,
+      recommendation_category: form.recommendation_category || null,
+      service_cost_cents:
+        form.service_cost === '' ? null : Math.round(Number(form.service_cost) * 100),
+      material_cost_cents:
+        form.material_cost === '' ? null : Math.round(Number(form.material_cost) * 100),
     };
 
     if (editingOrder) {
@@ -353,7 +551,10 @@ export function WorkOrderAdmin({
         ...payload,
         status: form.status,
         completed_at:
-          form.status === 'completed' ? new Date().toISOString() : null,
+          form.status === 'completed'
+            ? editingOrder.completed_at ?? new Date().toISOString()
+            : null,
+        ...(isBeingCancelled ? { cancellation_reason: cancellationReason } : {}),
       };
 
       const { error } = await supabase
@@ -390,6 +591,17 @@ export function WorkOrderAdmin({
   async function changeStatus(order: WorkOrderRow, nextStatus: WorkOrderStatus) {
     const action = statusLabels[nextStatus];
 
+    let cancellationReason: string | null = null;
+
+    if (order.status !== 'cancelled' && nextStatus === 'cancelled') {
+      cancellationReason = window.prompt('Informe o motivo do cancelamento desta OS.')?.trim() || null;
+
+      if (!cancellationReason) {
+        setErrorMessage('O cancelamento exige um motivo informado pelo supervisor.');
+        return;
+      }
+    }
+
     if (!window.confirm(`Deseja marcar a OS #${order.order_number} como "${action}"?`)) return;
 
     setIsSaving(true);
@@ -401,6 +613,7 @@ export function WorkOrderAdmin({
       .update({
         status: nextStatus,
         completed_at: nextStatus === 'completed' ? new Date().toISOString() : null,
+        ...(cancellationReason ? { cancellation_reason: cancellationReason } : {}),
       })
       .eq('id', order.id);
 
@@ -419,37 +632,21 @@ export function WorkOrderAdmin({
       case 'open':
         return ['in_progress', 'waiting_material', 'cancelled'];
       case 'in_progress':
-        return ['waiting_material', 'completed', 'cancelled'];
+        return ['waiting_material', 'cancelled'];
       case 'waiting_material':
-        return ['in_progress', 'completed', 'cancelled'];
+        return ['in_progress', 'cancelled'];
       case 'completed':
-        return ['in_progress'];
+        return [];
       case 'cancelled':
-        return ['open'];
+        return [];
       default:
         return [];
     }
   }
 
-  if (purchaseOrder) {
-    return (
-      <PurchaseRequestAdmin
-        tenantId={tenantId}
-        currentUserId={currentUserId}
-        order={purchaseOrder}
-        onClose={() => setPurchaseOrder(null)}
-        onSaved={() => {
-          setMessage(
-            `Requisições da OS #${purchaseOrder.order_number} atualizadas.`,
-          );
-          void loadData();
-        }}
-      />
-    );
-  }
-
   return (
     <div>
+      {!isDetailView && (
       <div className="user-admin-actions">
         <div className="asset-search">
           <select
@@ -489,9 +686,35 @@ export function WorkOrderAdmin({
           Atualizar lista
         </button>
       </div>
+      )}
 
-      {message && <p className="success-message">{message}</p>}
-      {errorMessage && <p className="error-message">{errorMessage}</p>}
+      {message && (
+        <div className="operation-toast operation-toast-success" role="status">
+          <span>{message}</span>
+          <button
+            type="button"
+            aria-label="Fechar mensagem"
+            title="Fechar"
+            onClick={() => setMessage('')}
+          >
+            <X size={16} />
+          </button>
+        </div>
+      )}
+
+      {errorMessage && (
+        <div className="operation-toast operation-toast-error" role="alert">
+          <span>{errorMessage}</span>
+          <button
+            type="button"
+            aria-label="Fechar aviso"
+            title="Fechar"
+            onClick={() => setErrorMessage('')}
+          >
+            <X size={16} />
+          </button>
+        </div>
+      )}
 
       {isFormOpen && (
         <form className="new-user-form panel" onSubmit={saveOrder}>
@@ -499,28 +722,68 @@ export function WorkOrderAdmin({
             <div>
               <p className="eyebrow">ORDEM DE SERVIÇO</p>
               <h2>
-                {editingOrder ? `Editar OS #${editingOrder.order_number}` : 'Nova ordem de serviço'}
+                {editingOrder ? `OS #${editingOrder.order_number}` : 'Nova ordem de serviço'}
               </h2>
             </div>
 
-            <button
-              type="button"
-              className="secondary icon-action"
-              title="Cancelar"
-              aria-label="Cancelar"
-              onClick={() => setIsFormOpen(false)}
-            >
-              <X size={18} />
-            </button>
+            {isDetailView ? (
+              <button
+                type="button"
+                className="secondary"
+                onClick={() => setIsFormOpen(false)}
+              >
+                Voltar para ordens de serviço
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="secondary icon-action"
+                title="Cancelar"
+                aria-label="Cancelar"
+                onClick={() => setIsFormOpen(false)}
+              >
+                <X size={18} />
+              </button>
+            )}
           </div>
 
           {editingOrder && (
             <div className="order-summary">
-              <p>
+                            <p>
                 <strong>Número:</strong> #{editingOrder.order_number} ·{' '}
                 <strong>Aberta em:</strong>{' '}
-                {new Date(editingOrder.opened_at).toLocaleDateString('pt-BR')}
+                {new Date(editingOrder.opened_at).toLocaleString('pt-BR')}
+
+                {editingOrder.scheduled_for && (
+                  <>
+                    {' · '}
+                    <strong>Programada para:</strong>{' '}
+                    {new Date(editingOrder.scheduled_for).toLocaleString('pt-BR')}
+                  </>
+                )}
+
+                {editingOrder.completed_at && (
+                  <>
+                    {' · '}
+                    <strong>Concluída em:</strong>{' '}
+                    {new Date(editingOrder.completed_at).toLocaleString('pt-BR')}
+                  </>
+                )}
               </p>
+              {editingOrder.estimated_total_cost_cents > 0 && (
+                <p>
+                  <strong>Estimativa aprovada:</strong>{' '}
+                  {currencyFormatter.format(editingOrder.estimated_total_cost_cents / 100)}
+                  {' · '}
+                  Serviços: {currencyFormatter.format(
+                    (editingOrder.estimated_service_cost_cents ?? 0) / 100,
+                  )}
+                  {' · '}
+                  Materiais: {currencyFormatter.format(
+                    (editingOrder.estimated_material_cost_cents ?? 0) / 100,
+                  )}
+                </p>
+              )}
             </div>
           )}
 
@@ -538,6 +801,230 @@ export function WorkOrderAdmin({
                 }
               />
             </label>
+            {editingOrder && (
+              <>
+                <label className="field">
+                  <span>Tipo de falha</span>
+                  <select
+                    value={form.diagnosis_category}
+                    onChange={(event) =>
+                      setForm({ ...form, diagnosis_category: event.target.value })
+                    }
+                  >
+                    <option value="">Selecione o tipo de falha</option>
+                    {diagnosisCategories.map((category) => (
+                      <option key={category} value={category}>
+                        {category}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <label className="field work-order-desc-field">
+                  <span>Diagnóstico técnico</span>
+                  <textarea
+                    rows={3}
+                    value={form.diagnosis}
+                    placeholder="O que foi identificado no equipamento?"
+                    onChange={(event) =>
+                      setForm({ ...form, diagnosis: event.target.value })
+                    }
+                  />
+                </label>
+
+                <label className="field">
+                  <span>Causa principal</span>
+                  <select
+                    value={form.root_cause_category}
+                    onChange={(event) =>
+                      setForm({ ...form, root_cause_category: event.target.value })
+                    }
+                  >
+                    <option value="">Selecione a causa principal</option>
+                    {rootCauseCategories.map((category) => (
+                      <option key={category} value={category}>
+                        {category}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <label className="field work-order-desc-field">
+                  <span>Causa raiz</span>
+                  <textarea
+                    rows={3}
+                    value={form.root_cause}
+                    placeholder="Qual foi a origem do problema?"
+                    onChange={(event) =>
+                      setForm({ ...form, root_cause: event.target.value })
+                    }
+                  />
+                </label>
+
+                <label className="field">
+                  <span>Ação realizada</span>
+                  <select
+                    value={form.action_category}
+                    onChange={(event) =>
+                      setForm({ ...form, action_category: event.target.value })
+                    }
+                  >
+                    <option value="">Selecione a ação realizada</option>
+                    {actionCategories.map((category) => (
+                      <option key={category} value={category}>
+                        {category}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <label className="field work-order-desc-field">
+                  <span>Ação executada</span>
+                  <textarea
+                    rows={3}
+                    value={form.action_taken}
+                    placeholder="O que foi feito durante a manutenção?"
+                    onChange={(event) =>
+                      setForm({ ...form, action_taken: event.target.value })
+                    }
+                  />
+                </label>
+
+                <label className="field">
+                  <span>Recomendação</span>
+                  <select
+                    value={form.recommendation_category}
+                    onChange={(event) =>
+                      setForm({ ...form, recommendation_category: event.target.value })
+                    }
+                  >
+                    <option value="">Selecione a recomendação</option>
+                    {recommendationCategories.map((category) => (
+                      <option key={category} value={category}>
+                        {category}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <label className="field work-order-desc-field">
+                  <span>Conclusão e recomendações</span>
+                  <textarea
+                    rows={3}
+                    value={form.resolution_notes}
+                    placeholder="Resultado, orientações e próximos cuidados."
+                    onChange={(event) =>
+                      setForm({ ...form, resolution_notes: event.target.value })
+                    }
+                  />
+                </label>
+
+                {form.asset_id && (
+                  <>
+                    <label className="field work-order-desc-field downtime-toggle">
+                      <span>
+                        <input
+                          type="checkbox"
+                          checked={form.causes_equipment_downtime}
+                          onChange={(event) =>
+                            setForm({
+                              ...form,
+                              causes_equipment_downtime: event.target.checked,
+                              downtime_started_at: event.target.checked
+                                ? form.downtime_started_at
+                                : '',
+                              downtime_ended_at: event.target.checked
+                                ? form.downtime_ended_at
+                                : '',
+                            })
+                          }
+                        />{' '}
+                        Esta OS causou parada do equipamento
+                      </span>
+                    </label>
+
+                    {form.causes_equipment_downtime && (
+                      <>
+                        <label className="field">
+                          <span>Início da parada *</span>
+                          <input
+                            type="datetime-local"
+                            required
+                            value={form.downtime_started_at}
+                            onChange={(event) =>
+                              setForm({
+                                ...form,
+                                downtime_started_at: event.target.value,
+                              })
+                            }
+                          />
+                        </label>
+
+                        <label className="field">
+                          <span>Fim da parada</span>
+                          <input
+                            type="datetime-local"
+                            value={form.downtime_ended_at}
+                            onChange={(event) =>
+                              setForm({
+                                ...form,
+                                downtime_ended_at: event.target.value,
+                              })
+                            }
+                          />
+                        </label>
+                      </>
+                    )}
+                  </>
+                )}
+              </>
+            )}
+
+            {editingOrder && isTenantAdmin && form.status === 'completed' && (
+              <section className="work-order-costs work-order-desc-field">
+                <div>
+                  <p className="eyebrow">VALIDACAO DO SUPERVISOR</p>
+                  <h3>Custos da OS</h3>
+                  <p>Informe somente os valores consolidados envolvidos no atendimento.</p>
+                </div>
+
+                <div className="work-order-costs-grid">
+                  <label className="field">
+                    <span>Servicos (R$)</span>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      inputMode="decimal"
+                      value={form.service_cost}
+                      placeholder="0,00"
+                      onChange={(event) =>
+                        setForm({ ...form, service_cost: event.target.value })
+                      }
+                    />
+                  </label>
+
+                  <label className="field">
+                    <span>Materiais (R$)</span>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      inputMode="decimal"
+                      value={form.material_cost}
+                      placeholder="0,00"
+                      onChange={(event) =>
+                        setForm({ ...form, material_cost: event.target.value })
+                      }
+                    />
+                  </label>
+                </div>
+
+                <strong className="work-order-cost-total">
+                  Total da OS: {currencyFormatter.format(formCostTotal)}
+                </strong>
+              </section>
+            )}
 
             <label className="field">
               <span>Tipo</span>
@@ -660,6 +1147,10 @@ export function WorkOrderAdmin({
                 <span>Status</span>
                 <select
                   value={form.status}
+                  disabled={
+                    editingOrder.status === 'completed' ||
+                    editingOrder.status === 'cancelled'
+                  }
                   onChange={(event) =>
                     setForm({
                       ...form,
@@ -711,6 +1202,7 @@ export function WorkOrderAdmin({
         </form>
       )}
 
+      {!isDetailView && (
       <article className="panel table">
         <div className="table-head work-order-table-head">
           <span>ORDEM</span>
@@ -719,7 +1211,6 @@ export function WorkOrderAdmin({
           <span>PRIORIDADE</span>
           <span>RESPONSÁVEL</span>
           <span>STATUS</span>
-          {isTenantAdmin && <span>AÇÕES</span>}
         </div>
 
         {isLoading && <div className="empty-state">Carregando ordens de serviço...</div>}
@@ -736,9 +1227,13 @@ export function WorkOrderAdmin({
           filteredOrders.map((order) => (
             <div className="table-row work-order-table-row" key={order.id}>
               <div>
-                <strong>
+                <button
+                  type="button"
+                  className="work-order-link"
+                  onClick={() => openEditOrder(order)}
+                >
                   #{order.order_number} · {order.title}
-                </strong>
+                </button>
                 <small>
                   {order.opened_by_name
                     ? `Aberta por ${order.opened_by_name}`
@@ -773,47 +1268,10 @@ export function WorkOrderAdmin({
                 )}
               </span>
 
-              {isTenantAdmin && (
-                <span className="asset-actions">
-                  <button
-                    className="secondary icon-action"
-                    disabled={isSaving}
-                    title="Editar OS"
-                    aria-label={`Editar OS #${order.order_number}`}
-                    onClick={() => openEditOrder(order)}
-                  >
-                    <Pencil size={18} />
-                  </button>
-<button
-  className="secondary icon-action"
-  disabled={isSaving}
-  title="Solicitar compra ou material"
-  aria-label={`Criar requisição de compra para OS #${order.order_number}`}
-  onClick={() => setPurchaseOrder(order)}
->
-  <PackagePlus size={18} />
-</button>
-                  {getStatusNextOptions(order.status).map((nextStatus) => (
-                    <button
-                      key={nextStatus}
-                      className={`secondary icon-action work-order-status-action`}
-                      disabled={isSaving}
-                      title={`Marcar como ${statusLabels[nextStatus]}`}
-                      aria-label={`Marcar OS #${order.order_number} como ${statusLabels[nextStatus]}`}
-                      onClick={() => void changeStatus(order, nextStatus)}
-                    >
-                      {nextStatus === 'completed' ? (
-                        <CheckCircle2 size={18} />
-                      ) : (
-                        <ClipboardList size={18} />
-                      )}
-                    </button>
-                  ))}
-                </span>
-              )}
             </div>
           ))}
       </article>
+      )}
     </div>
   );
 }

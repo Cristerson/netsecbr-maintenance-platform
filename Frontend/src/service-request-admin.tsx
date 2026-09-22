@@ -1,8 +1,6 @@
 import { type FormEvent, useCallback, useEffect, useState } from 'react';
 import {
   ArrowRight,
-  CheckCircle2,
-  Pencil,
   Plus,
   RefreshCw,
   X,
@@ -34,6 +32,14 @@ type ServiceRequest = {
   requested_by: string;
   requested_at: string;
   converted_to_work_order_id: string | null;
+  triage_notes: string | null;
+  estimated_service_cost_cents: number | null;
+  estimated_material_cost_cents: number | null;
+  estimated_total_cost_cents: number;
+  triaged_at: string | null;
+  triaged_by: string | null;
+  approved_at: string | null;
+  approved_by: string | null;
 };
 
 type ServiceRequestRow = ServiceRequest & {
@@ -82,6 +88,11 @@ const priorityLabels: Record<ServiceRequestPriority, string> = {
   critical: 'Crítica',
 };
 
+const currencyFormatter = new Intl.NumberFormat('pt-BR', {
+  style: 'currency',
+  currency: 'BRL',
+});
+
 const emptyForm = {
   title: '',
   description: '',
@@ -90,6 +101,10 @@ const emptyForm = {
   unit_id: '',
   cost_center_id: '',
   asset_id: '',
+  status: 'open' as ServiceRequestStatus,
+  triage_notes: '',
+  estimated_service_cost: '',
+  estimated_material_cost: '',
 };
 
 export function ServiceRequestAdmin({
@@ -110,6 +125,7 @@ export function ServiceRequestAdmin({
   const [form, setForm] = useState(emptyForm);
   const [message, setMessage] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
+  const isDetailView = isFormOpen && editingRequest !== null;
 
   const loadData = useCallback(async () => {
     setIsLoading(true);
@@ -118,7 +134,7 @@ export function ServiceRequestAdmin({
     const { data: requestsData, error: requestsError } = await supabase
       .from('service_requests')
       .select(
-        `id, request_number, tenant_id, unit_id, cost_center_id, asset_id, title, description, category, priority, status, requested_by, requested_at, converted_to_work_order_id,
+        `id, request_number, tenant_id, unit_id, cost_center_id, asset_id, title, description, category, priority, status, requested_by, requested_at, converted_to_work_order_id, triage_notes, estimated_service_cost_cents, estimated_material_cost_cents, estimated_total_cost_cents, triaged_at, triaged_by, approved_at, approved_by,
         assets(name),
         units(name),
         cost_centers(name),
@@ -190,6 +206,14 @@ export function ServiceRequestAdmin({
     statusFilter === 'all' ? true : request.status === statusFilter,
   );
 
+  const estimatedTotal =
+    (Number.isFinite(Number(form.estimated_service_cost))
+      ? Number(form.estimated_service_cost)
+      : 0) +
+    (Number.isFinite(Number(form.estimated_material_cost))
+      ? Number(form.estimated_material_cost)
+      : 0);
+
   const availableUnits = units.filter(
     (unit) => unit.is_active || unit.id === editingRequest?.unit_id,
   );
@@ -239,6 +263,16 @@ export function ServiceRequestAdmin({
       unit_id: request.unit_id,
       cost_center_id: request.cost_center_id,
       asset_id: request.asset_id ?? '',
+      status: request.status,
+      triage_notes: request.triage_notes ?? '',
+      estimated_service_cost:
+        request.estimated_service_cost_cents === null
+          ? ''
+          : (request.estimated_service_cost_cents / 100).toFixed(2),
+      estimated_material_cost:
+        request.estimated_material_cost_cents === null
+          ? ''
+          : (request.estimated_material_cost_cents / 100).toFixed(2),
     });
     setIsFormOpen(true);
   }
@@ -272,6 +306,23 @@ export function ServiceRequestAdmin({
       return;
     }
 
+    if (
+      (form.estimated_service_cost !== '' &&
+        (!Number.isFinite(Number(form.estimated_service_cost)) ||
+          Number(form.estimated_service_cost) < 0)) ||
+      (form.estimated_material_cost !== '' &&
+        (!Number.isFinite(Number(form.estimated_material_cost)) ||
+          Number(form.estimated_material_cost) < 0))
+    ) {
+      setErrorMessage('Informe valores validos para servicos e materiais estimados.');
+      return;
+    }
+
+    if (editingRequest && form.status === 'triaged' && !form.triage_notes.trim()) {
+      setErrorMessage('Informe a triagem do supervisor antes de encaminhar a solicitacao.');
+      return;
+    }
+
     setIsSaving(true);
     setMessage('');
     setErrorMessage('');
@@ -284,6 +335,16 @@ export function ServiceRequestAdmin({
       unit_id: form.unit_id,
       cost_center_id: form.cost_center_id,
       asset_id: form.asset_id || null,
+      ...(editingRequest ? { status: form.status } : {}),
+      triage_notes: form.triage_notes.trim() || null,
+      estimated_service_cost_cents:
+        form.estimated_service_cost === ''
+          ? null
+          : Math.round(Number(form.estimated_service_cost) * 100),
+      estimated_material_cost_cents:
+        form.estimated_material_cost === ''
+          ? null
+          : Math.round(Number(form.estimated_material_cost) * 100),
     };
 
     if (editingRequest) {
@@ -366,7 +427,7 @@ export function ServiceRequestAdmin({
     setIsSaving(false);
   }
 
-  async function convertToWorkOrder(request: ServiceRequestRow) {
+  async function convertToWorkOrder(request: ServiceRequest) {
     if (!isTenantAdmin) return;
 
     if (
@@ -381,22 +442,16 @@ export function ServiceRequestAdmin({
     setMessage('');
     setErrorMessage('');
 
-    const { data: newOrder, error: orderError } = await supabase
-      .from('work_orders')
-      .insert({
-        tenant_id: tenantId,
-        unit_id: request.unit_id,
-        cost_center_id: request.cost_center_id,
-        asset_id: request.asset_id,
-        title: request.title,
-        description: request.description,
-        type: 'corrective',
-        priority: request.priority,
-        status: 'open',
-        opened_by: currentUserId,
-      })
-      .select('id, order_number')
-      .single();
+    const { data, error } = await supabase.rpc(
+      'approve_service_request_and_create_work_order',
+      { target_request_id: request.id },
+    );
+
+    const rpcOrder = data?.[0];
+    const newOrder = rpcOrder
+      ? { id: rpcOrder.work_order_id, order_number: rpcOrder.order_number }
+      : null;
+    const orderError = error;
 
     if (orderError || !newOrder) {
       setErrorMessage(`Não foi possível criar a ordem de serviço: ${orderError?.message ?? 'Erro desconhecido'}`);
@@ -424,7 +479,7 @@ export function ServiceRequestAdmin({
 
   return (
     <div>
-      <div className="user-admin-actions">
+      {!isDetailView && <div className="user-admin-actions">
         <div className="asset-search">
           <select
             className="status-filter"
@@ -462,10 +517,35 @@ export function ServiceRequestAdmin({
           <RefreshCw size={17} />
           Atualizar lista
         </button>
-      </div>
+      </div>}
 
-      {message && <p className="success-message">{message}</p>}
-      {errorMessage && <p className="error-message">{errorMessage}</p>}
+      {message && (
+        <div className="operation-toast operation-toast-success" role="status">
+          <span>{message}</span>
+          <button
+            type="button"
+            aria-label="Fechar mensagem"
+            title="Fechar"
+            onClick={() => setMessage('')}
+          >
+            <X size={16} />
+          </button>
+        </div>
+      )}
+
+      {errorMessage && (
+        <div className="operation-toast operation-toast-error" role="alert">
+          <span>{errorMessage}</span>
+          <button
+            type="button"
+            aria-label="Fechar aviso"
+            title="Fechar"
+            onClick={() => setErrorMessage('')}
+          >
+            <X size={16} />
+          </button>
+        </div>
+      )}
 
       {isFormOpen && (
         <form className="new-user-form panel" onSubmit={saveRequest}>
@@ -474,19 +554,19 @@ export function ServiceRequestAdmin({
               <p className="eyebrow">SOLICITAÇÃO DE MANUTENÇÃO</p>
               <h2>
                 {editingRequest
-                  ? `Editar solicitação #${editingRequest.request_number}`
+                  ? `Solicitação #${editingRequest.request_number}`
                   : 'Nova solicitação'}
               </h2>
             </div>
 
             <button
               type="button"
-              className="secondary icon-action"
-              title="Cancelar"
-              aria-label="Cancelar"
+              className="secondary"
+              title={editingRequest ? 'Voltar para solicitações' : 'Cancelar'}
+              aria-label={editingRequest ? 'Voltar para solicitações' : 'Cancelar'}
               onClick={() => setIsFormOpen(false)}
             >
-              <X size={18} />
+              {editingRequest ? 'Voltar para solicitações' : <X size={18} />}
             </button>
           </div>
 
@@ -617,9 +697,94 @@ export function ServiceRequestAdmin({
                 }
               />
             </label>
+            {editingRequest && isTenantAdmin && editingRequest.status !== 'converted_to_wo' && (
+              <section className="work-order-costs work-order-desc-field">
+                <div>
+                  <p className="eyebrow">TRIAGEM DO SUPERVISOR</p>
+                  <h3>Aprovação e estimativa</h3>
+                  <p>Registre a análise e a estimativa antes de aprovar a geração da OS.</p>
+                </div>
+
+                <div className="work-order-costs-grid">
+                  <label className="field">
+                    <span>Status da solicitação</span>
+                    <select
+                      value={form.status}
+                      onChange={(event) =>
+                        setForm({
+                          ...form,
+                          status: event.target.value as ServiceRequestStatus,
+                        })
+                      }
+                    >
+                      <option value="open">Aberta</option>
+                      <option value="triaged">Encaminhar para aprovação</option>
+                      <option value="cancelled">Cancelar solicitação</option>
+                    </select>
+                  </label>
+
+                  <label className="field">
+                    <span>Serviços estimados (R$)</span>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      inputMode="decimal"
+                      value={form.estimated_service_cost}
+                      placeholder="0,00"
+                      onChange={(event) =>
+                        setForm({ ...form, estimated_service_cost: event.target.value })
+                      }
+                    />
+                  </label>
+
+                  <label className="field">
+                    <span>Materiais estimados (R$)</span>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      inputMode="decimal"
+                      value={form.estimated_material_cost}
+                      placeholder="0,00"
+                      onChange={(event) =>
+                        setForm({ ...form, estimated_material_cost: event.target.value })
+                      }
+                    />
+                  </label>
+                </div>
+
+                <label className="field">
+                  <span>Triagem do supervisor *</span>
+                  <textarea
+                    rows={3}
+                    value={form.triage_notes}
+                    placeholder="Avaliação inicial, impacto e justificativa para execução."
+                    onChange={(event) =>
+                      setForm({ ...form, triage_notes: event.target.value })
+                    }
+                  />
+                </label>
+
+                <strong className="work-order-cost-total">
+                  Total estimado: {currencyFormatter.format(estimatedTotal)}
+                </strong>
+              </section>
+            )}
           </div>
 
           <div className="form-actions">
+            {editingRequest && isTenantAdmin && editingRequest.status === 'triaged' && (
+              <button
+                type="button"
+                className="secondary button-with-icon"
+                disabled={isSaving}
+                onClick={() => void convertToWorkOrder(editingRequest)}
+              >
+                <ArrowRight size={17} />
+                Aprovar e criar OS
+              </button>
+            )}
             <button type="submit" disabled={isSaving} className="button-with-icon">
               {isSaving
                 ? 'Salvando...'
@@ -639,14 +804,13 @@ export function ServiceRequestAdmin({
         </form>
       )}
 
-      <article className="panel table">
+      {!isDetailView && <article className="panel table">
         <div className="table-head request-table-head">
           <span>SOLICITAÇÃO</span>
           <span>ATIVO / UNIDADE</span>
           <span>CATEGORIA</span>
           <span>PRIORIDADE</span>
           <span>STATUS</span>
-          {isTenantAdmin && <span>AÇÕES</span>}
         </div>
 
         {isLoading && <div className="empty-state">Carregando solicitações...</div>}
@@ -663,9 +827,13 @@ export function ServiceRequestAdmin({
           filteredRequests.map((request) => (
             <div className="table-row request-table-row" key={request.id}>
               <div>
-                <strong>
+                <button
+                  type="button"
+                  className="work-order-link"
+                  onClick={() => openEditRequest(request)}
+                >
                   #{request.request_number} · {request.title}
-                </strong>
+                </button>
                 <small>
                   {request.requested_by_name
                     ? `Solicitada por ${request.requested_by_name}`
@@ -701,53 +869,9 @@ export function ServiceRequestAdmin({
                 )}
               </span>
 
-              {isTenantAdmin && (
-                <span className="asset-actions">
-                  {request.status !== 'converted_to_wo' && (
-                    <button
-                      className="secondary icon-action"
-                      disabled={isSaving}
-                      title="Editar solicitação"
-                      aria-label={`Editar solicitação #${request.request_number}`}
-                      onClick={() => openEditRequest(request)}
-                    >
-                      <Pencil size={18} />
-                    </button>
-                  )}
-
-                  {request.status === 'open' || request.status === 'triaged' ? (
-                    <button
-                      className="secondary icon-action request-convert-action"
-                      disabled={isSaving}
-                      title="Converter em ordem de serviço"
-                      aria-label={`Converter solicitação #${request.request_number} em OS`}
-                      onClick={() => void convertToWorkOrder(request)}
-                    >
-                      <ArrowRight size={18} />
-                    </button>
-                  ) : null}
-
-                  {getNextTransitions(request.status).map((transition) => (
-                    <button
-                      key={transition.status}
-                      className={`secondary icon-action request-status-action ${transition.status === 'cancelled' ? 'request-cancel-action' : ''}`}
-                      disabled={isSaving}
-                      title={`${transition.label}`}
-                      aria-label={`Marcar solicitação #${request.request_number} como ${statusLabels[transition.status]}`}
-                      onClick={() => void changeStatus(request, transition.status)}
-                    >
-                      {transition.status === 'cancelled' ? (
-                        <X size={18} />
-                      ) : (
-                        <CheckCircle2 size={18} />
-                      )}
-                    </button>
-                  ))}
-                </span>
-              )}
             </div>
           ))}
-      </article>
+      </article>}
     </div>
   );
 }
