@@ -323,6 +323,9 @@ export function WorkOrderAdmin({
   );
 
   const isDetailView = isFormOpen && editingOrder !== null;
+  // Detalhe de OS existente é somente leitura para quem não administra o cliente.
+  // A criação de nova OS permanece disponível conforme canCreate.
+  const isReadOnlyDetail = editingOrder !== null && !isTenantAdmin;
 
   const formCostTotal =
     (Number.isFinite(Number(form.service_cost)) ? Number(form.service_cost) : 0) +
@@ -589,6 +592,8 @@ export function WorkOrderAdmin({
   }
 
   async function changeStatus(order: WorkOrderRow, nextStatus: WorkOrderStatus) {
+    if (!isTenantAdmin) return;
+
     const action = statusLabels[nextStatus];
 
     let cancellationReason: string | null = null;
@@ -787,6 +792,11 @@ export function WorkOrderAdmin({
             </div>
           )}
 
+          <fieldset
+            className="readonly-fields"
+            disabled={isReadOnlyDetail}
+            style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}
+          >
           <div className="asset-form-grid">
             <label className="field work-order-title-field">
               <span>Título *</span>
@@ -1181,22 +1191,25 @@ export function WorkOrderAdmin({
               />
             </label>
           </div>
+          </fieldset>
 
           <div className="form-actions">
-            <button type="submit" disabled={isSaving} className="button-with-icon">
-              {isSaving
-                ? 'Salvando...'
-                : editingOrder
-                  ? 'Salvar alterações'
-                  : 'Cadastrar OS'}
-            </button>
+            {!isReadOnlyDetail && (
+              <button type="submit" disabled={isSaving} className="button-with-icon">
+                {isSaving
+                  ? 'Salvando...'
+                  : editingOrder
+                    ? 'Salvar alterações'
+                    : 'Cadastrar OS'}
+              </button>
+            )}
 
             <button
               type="button"
               className="secondary"
               onClick={() => setIsFormOpen(false)}
             >
-              Cancelar
+              {isReadOnlyDetail ? 'Fechar' : 'Cancelar'}
             </button>
           </div>
         </form>

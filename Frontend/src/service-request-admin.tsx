@@ -126,6 +126,9 @@ export function ServiceRequestAdmin({
   const [message, setMessage] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
   const isDetailView = isFormOpen && editingRequest !== null;
+  // Detalhe de solicitação existente é somente leitura para quem não administra
+  // o cliente. A abertura de nova solicitação continua conforme canCreate.
+  const isReadOnlyDetail = editingRequest !== null && !isTenantAdmin;
 
   const loadData = useCallback(async () => {
     setIsLoading(true);
@@ -580,6 +583,11 @@ export function ServiceRequestAdmin({
             </div>
           )}
 
+          <fieldset
+            className="readonly-fields"
+            disabled={isReadOnlyDetail}
+            style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}
+          >
           <div className="asset-form-grid">
             <label className="field work-order-title-field">
               <span>Título *</span>
@@ -773,6 +781,8 @@ export function ServiceRequestAdmin({
             )}
           </div>
 
+          </fieldset>
+
           <div className="form-actions">
             {editingRequest && isTenantAdmin && editingRequest.status === 'triaged' && (
               <button
@@ -785,7 +795,7 @@ export function ServiceRequestAdmin({
                 Aprovar e criar OS
               </button>
             )}
-            <button type="submit" disabled={isSaving} className="button-with-icon">
+            <button type="submit" disabled={isSaving || isReadOnlyDetail} className="button-with-icon" hidden={isReadOnlyDetail}>
               {isSaving
                 ? 'Salvando...'
                 : editingRequest
@@ -798,7 +808,7 @@ export function ServiceRequestAdmin({
               className="secondary"
               onClick={() => setIsFormOpen(false)}
             >
-              Cancelar
+              {isReadOnlyDetail ? 'Fechar' : 'Cancelar'}
             </button>
           </div>
         </form>

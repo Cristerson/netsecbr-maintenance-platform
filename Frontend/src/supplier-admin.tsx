@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
   Building2,
+  Pencil,
   Power,
   RefreshCw,
   UserPlus,
-  X,
 } from 'lucide-react';
 import { supabase } from './supabase';
 
@@ -79,6 +79,8 @@ export function SupplierAdmin({ tenantId }: Props) {
   const [form, setForm] = useState(emptySupplier);
   const [message, setMessage] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
+  const [selectedSupplier, setSelectedSupplier] = useState<Supplier | null>(null);
+  const isDetailView = isFormOpen && selectedSupplier !== null;
 
   const loadSuppliers = useCallback(async () => {
     setIsLoading(true);
@@ -104,6 +106,108 @@ export function SupplierAdmin({ tenantId }: Props) {
   useEffect(() => {
     void loadSuppliers();
   }, [loadSuppliers]);
+
+  function openSupplierDetail(supplier: Supplier) {
+    setMessage('');
+    setErrorMessage('');
+    setSelectedSupplier(supplier);
+    setForm({
+      legalName: supplier.legal_name,
+      tradeName: supplier.trade_name ?? '',
+      documentNumber: supplier.document_number ?? '',
+      email: supplier.email ?? '',
+      phone: supplier.phone ?? '',
+      serviceCategory: supplier.service_category ?? 'Peças e serviços',
+      notes: supplier.notes ?? '',
+    });
+    setIsFormOpen(true);
+  }
+
+  function openNewSupplier() {
+    setMessage('');
+    setErrorMessage('');
+    setSelectedSupplier(null);
+    setForm(emptySupplier);
+    setIsFormOpen(true);
+  }
+
+  function closeSupplierForm() {
+    setIsFormOpen(false);
+    setSelectedSupplier(null);
+    setForm(emptySupplier);
+  }
+
+  async function saveSupplier() {
+    if (!selectedSupplier) return;
+
+    if (!form.legalName.trim()) {
+      setErrorMessage('Informe a razão social ou nome do fornecedor.');
+      return;
+    }
+    if (
+      form.documentNumber.trim() &&
+      !isValidCnpj(form.documentNumber)
+    ) {
+      setErrorMessage('Informe um CNPJ válido ou deixe o campo em branco.');
+      return;
+    }
+
+    setIsSaving(true);
+    setMessage('');
+    setErrorMessage('');
+
+    const { error } = await supabase
+      .from('suppliers')
+      .update({
+        legal_name: form.legalName.trim(),
+        trade_name: form.tradeName.trim() || null,
+        document_number: form.documentNumber.trim() || null,
+        email: form.email.trim().toLowerCase() || null,
+        phone: form.phone.trim() || null,
+        service_category: form.serviceCategory,
+        notes: form.notes.trim() || null,
+      })
+      .eq('id', selectedSupplier.id)
+      .eq('tenant_id', tenantId);
+
+    if (error) {
+      setErrorMessage(`Não foi possível salvar as alterações: ${error.message}`);
+    } else {
+      setMessage('Alterações salvas com sucesso.');
+      setIsFormOpen(false);
+      setSelectedSupplier(null);
+      setForm(emptySupplier);
+      await loadSuppliers();
+    }
+
+    setIsSaving(false);
+  }
+
+  async function toggleSupplierActive() {
+    if (!selectedSupplier) return;
+
+    const nextIsActive = !selectedSupplier.is_active;
+
+    setIsSaving(true);
+    setMessage('');
+    setErrorMessage('');
+
+    const { error } = await supabase
+      .from('suppliers')
+      .update({ is_active: nextIsActive })
+      .eq('id', selectedSupplier.id)
+      .eq('tenant_id', tenantId);
+
+    if (error) {
+      setErrorMessage(`Não foi possível atualizar o fornecedor: ${error.message}`);
+    } else {
+      setSelectedSupplier({ ...selectedSupplier, is_active: nextIsActive });
+      setMessage(`Fornecedor ${nextIsActive ? 'ativado' : 'desativado'} com sucesso.`);
+      await loadSuppliers();
+    }
+
+    setIsSaving(false);
+  }
 
   async function createSupplier() {
     if (!form.legalName.trim()) {
@@ -173,11 +277,7 @@ if (
       <div className="user-admin-actions">
         <button
           className="button-with-icon"
-          onClick={() => {
-            setMessage('');
-            setErrorMessage('');
-            setIsFormOpen(true);
-          }}
+          onClick={openNewSupplier}
         >
           <UserPlus size={17} />
           Novo fornecedor
@@ -200,17 +300,19 @@ if (
         <section className="new-user-form panel">
           <div className="panel-head">
             <div>
-              <p className="eyebrow">NOVO FORNECEDOR</p>
-              <h2>Cadastro manual</h2>
+              <p className="eyebrow">FORNECEDOR</p>
+              <h2>
+                {selectedSupplier
+                  ? `Fornecedor: ${selectedSupplier.trade_name || selectedSupplier.legal_name}`
+                  : 'Cadastro manual'}
+              </h2>
             </div>
 
             <button
-              className="secondary icon-action"
-              title="Cancelar cadastro"
-              aria-label="Cancelar cadastro"
-              onClick={() => setIsFormOpen(false)}
+              className="secondary"
+              onClick={closeSupplierForm}
             >
-              <X size={18} />
+              {isDetailView ? 'Voltar para fornecedores' : 'Cancelar'}
             </button>
           </div>
 
@@ -296,18 +398,40 @@ if (
           </label>
 
           <div className="form-actions">
+            {isDetailView && (
+              <button
+                type="button"
+                className="secondary button-with-icon"
+                disabled={isSaving}
+                onClick={() => void toggleSupplierActive()}
+              >
+                <Power size={17} />
+                {selectedSupplier?.is_active ? 'Desativar fornecedor' : 'Ativar fornecedor'}
+              </button>
+            )}
+
             <button
+              type="button"
               className="button-with-icon"
               disabled={isSaving}
-              onClick={() => void createSupplier()}
+              onClick={() => void (isDetailView ? saveSupplier() : createSupplier())}
             >
-              <Building2 size={17} />
-              {isSaving ? 'Salvando...' : 'Cadastrar fornecedor'}
+              {isDetailView ? (
+                <Pencil size={17} />
+              ) : (
+                <Building2 size={17} />
+              )}
+              {isSaving
+                ? 'Salvando...'
+                : isDetailView
+                  ? 'Salvar alterações'
+                  : 'Cadastrar fornecedor'}
             </button>
           </div>
         </section>
       )}
 
+      {!isFormOpen && (
       <div className="table">
         {isLoading && (
           <div className="empty-state">Carregando fornecedores...</div>
@@ -323,7 +447,9 @@ if (
           suppliers.map((supplier) => (
            <div className={`table-row ${supplier.is_active ? '' : 'is-inactive'}`} key={supplier.id}
 >              <div>
-                <strong>{supplier.trade_name || supplier.legal_name}</strong>
+                <button type="button" className="work-order-link" onClick={() => openSupplierDetail(supplier)}>
+                  {supplier.trade_name || supplier.legal_name}
+                </button>
                 <small>
                   {supplier.service_category || 'Não informado'}
                   {supplier.document_number
@@ -333,21 +459,10 @@ if (
               </div>
 
               <span>{supplier.email || supplier.phone || 'Sem contato'}</span>
-
-              <button
-                className="secondary icon-action"
-                disabled={isSaving}
-                title={supplier.is_active ? 'Desativar fornecedor' : 'Ativar fornecedor'}
-                aria-label={
-                  supplier.is_active ? 'Desativar fornecedor' : 'Ativar fornecedor'
-                }
-                onClick={() => void toggleActive(supplier)}
-              >
-                <Power size={18} />
-              </button>
             </div>
           ))}
       </div>
+      )}
     </div>
   );
 }

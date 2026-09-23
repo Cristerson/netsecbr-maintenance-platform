@@ -718,13 +718,17 @@ export function PreventivePlanAdmin({ tenantId, canManage }: Props) {
                   </div>
 
                   <div>
-                    <button
-                      type="button"
-                      className="work-order-link"
-                      onClick={() => openEditPlan(plan)}
-                    >
-                      {plan.name}
-                    </button>
+                    {canManage ? (
+                      <button
+                        type="button"
+                        className="work-order-link"
+                        onClick={() => openEditPlan(plan)}
+                      >
+                        {plan.name}
+                      </button>
+                    ) : (
+                      <span>{plan.name}</span>
+                    )}
                   </div>
 
                   <span>{plan.periodicity_days} dias</span>

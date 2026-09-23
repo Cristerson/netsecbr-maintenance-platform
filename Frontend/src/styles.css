@@ -808,3 +808,4 @@ header h1 { font-size: 25px; }
 .search { border-radius: 8px; background: #f7f9fc; }
 .avatar { box-shadow: 0 0 0 3px #fff4dd; }
 @media (max-width: 900px) { main { margin-left: 0; width: 100%; } }
+.data-error { display: block; margin-bottom: 14px; padding: 10px 14px; border: 1px solid #f3c7c7; border-radius: 8px; background: #fdf3f3; color: #a13c3c; font-size: 13px; }

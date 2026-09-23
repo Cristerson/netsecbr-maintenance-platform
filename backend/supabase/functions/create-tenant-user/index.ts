@@ -65,16 +65,31 @@ Deno.serve(async (request) => {
     if (allowedDomainError) return response({ error: 'Não foi possível validar o domínio de e-mail.' }, 500, headers)
     if (!allowedEmailDomain) return response({ error: `O domínio @${emailDomain} não está autorizado para este cliente.` }, 400, headers)
 
-    const { data: callerMembership, error: membershipError } = await supabaseAdmin
-      .from('tenant_memberships')
-      .select('id')
-      .eq('tenant_id', tenantId)
-      .eq('user_id', caller.id)
-      .eq('role', 'tenant_admin')
-      .eq('is_active', true)
-      .maybeSingle()
+    const [
+      { data: callerProfile, error: callerProfileError },
+      { data: callerMembership, error: membershipError },
+    ] = await Promise.all([
+      supabaseAdmin
+        .from('profiles')
+        .select('platform_role, is_active')
+        .eq('id', caller.id)
+        .maybeSingle(),
+      supabaseAdmin
+        .from('tenant_memberships')
+        .select('id')
+        .eq('tenant_id', tenantId)
+        .eq('user_id', caller.id)
+        .eq('role', 'tenant_admin')
+        .eq('is_active', true)
+        .maybeSingle(),
+    ])
 
-    if (membershipError || !callerMembership) {
+    if (callerProfileError) {
+      return response({ error: 'Não foi possível validar o seu perfil.' }, 500, headers)
+    }
+
+    const isNetsecbrAdmin = callerProfile?.platform_role === 'netsecbr_admin' && callerProfile.is_active
+    if (!isNetsecbrAdmin && !callerMembership) {
       return response({ error: 'Você não tem permissão para cadastrar usuários neste cliente.' }, 403, headers)
     }
 

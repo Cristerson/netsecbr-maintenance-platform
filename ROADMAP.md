@@ -13,12 +13,16 @@ Toda funcionalidade deve ser pensada para usuários com pouca familiaridade digi
 
 ## Próxima entrega — Consolidação do MVP operacional
 
-- Validar ponta a ponta ativos, solicitações, OS, compras, usuários e permissões.
+- Validar ponta a ponta ativos, solicitações, OS, preventivas, usuários e permissões
+  (roteiro de aceite em `documentação/14_Roteiro_Aceite_MVP_V1.md`).
 - Consolidar o design system e a navegação de Operações de Manutenção.
 - Revisar o NETSECBR Command Center como ambiente global distinto.
 - Produzir o Manual de Operação do MVP V1, com passos, telas, dependências,
   permissões, impactos e validações de cada rotina operacional.
 - Publicar somente entregas concluídas, mantendo módulos em construção fora dos commits.
+- Antes de qualquer publicação ou produção, executar auditoria de segurança e privacidade:
+  revisão de chamadas externas, credenciais, dependências, scripts, RLS, grants, RPCs,
+  Edge Functions, CORS e diffs do Git. Nenhuma entrega segue sem essa validação.
 
 - Atualizar automaticamente os dados exibidos após ações relevantes, sem exigir F5,
   priorizando a usabilidade de técnicos em campo.

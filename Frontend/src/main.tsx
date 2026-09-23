@@ -4,6 +4,7 @@ import {
   AlertTriangle,
   ArrowRight,
   Bell,
+  BookOpen,
   Building2,
   Box,
   CalendarClock,
@@ -35,6 +36,8 @@ import { BrandingAdmin } from './branding-admin';
 import { FinanceAdmin } from './finance-admin';
 import { PurchaseManagement } from './purchase-management';
 import { PreventivePlanAdmin } from './preventive-plan-admin';
+import { HelpCenterPage } from './help-center';
+import { CommandCenter } from './command-center';
 import './styles.css';
 import './brand.css';
 import './auth.css';
@@ -54,6 +57,7 @@ function App({ account }: { account: CurrentAccount }) {
     | 'requests'
     | 'orders'
     | 'preventive_plans'
+    | 'help'
     | 'purchases'
     | 'client_admin'
     | 'netsecbr_admin'
@@ -78,8 +82,9 @@ function App({ account }: { account: CurrentAccount }) {
     { id: 'requests', label: 'Solicitações', icon: AlertTriangle },
     { id: 'orders', label: 'Ordens de serviço', icon: ClipboardList },
     { id: 'preventive_plans', label: 'Preventivas', icon: CalendarClock },
+    { id: 'help', label: 'Ajuda', icon: BookOpen },
     { id: 'client_admin', label: 'Configurações', icon: Factory },
-    { id: 'netsecbr_admin', label: 'Control Center NETSECBR', icon: Wrench },
+    { id: 'netsecbr_admin', label: 'MARV Command Center', icon: Wrench },
   ] as const;
 
   async function signOut() {
@@ -94,6 +99,9 @@ function App({ account }: { account: CurrentAccount }) {
   const visibleNav = nav.filter(({ id }) => {
     if (id === 'dashboard') return true;
 
+    // A Ajuda é liberada para todo usuário autenticado.
+    if (id === 'help') return true;
+
     if (id === 'assets') {
       return canAccess('assets.read') || canAccess('assets.manage');
     }
@@ -103,11 +111,7 @@ function App({ account }: { account: CurrentAccount }) {
     }
 
     if (id === 'orders') {
-      return (
-        canAccess('work_orders.read') ||
-        canAccess('work_orders.create') ||
-        canAccess('work_orders.execute')
-      );
+      return canAccess('work_orders.read') || canAccess('work_orders.create');
     }
     if (id === 'preventive_plans') {
       return (
@@ -128,6 +132,15 @@ function App({ account }: { account: CurrentAccount }) {
 
     return false;
   });
+
+  // Atalhos do Dashboard seguem exatamente as mesmas condições do menu:
+  // nenhum botão abre um módulo que estaria oculto na navegação.
+  const canOpenOrders = canAccess('work_orders.read') || canAccess('work_orders.create');
+  const canOpenPreventivePlans =
+    canAccess('assets.read') ||
+    canAccess('assets.manage') ||
+    canAccess('work_orders.read') ||
+    canAccess('work_orders.create');
 
   return (
     <div className="app-shell">
@@ -209,7 +222,9 @@ function App({ account }: { account: CurrentAccount }) {
                 : page === 'client_admin'
                   ? 'MARV'
                   : page === 'netsecbr_admin'
-                    ? 'ADMINISTRAÇÃO DA PLATAFORMA'
+                    ? 'VISÃO GLOBAL DA OPERAÇÃO MARV'
+                  : page === 'help'
+                    ? 'SUPORTE E ORIENTAÇÕES'
                   : 'GESTÃO DE MANUTENÇÃO'}
             </p>
 
@@ -228,7 +243,7 @@ function App({ account }: { account: CurrentAccount }) {
                    ? 'Compras'
                       : page === 'client_admin'
                         ? 'Configurações'
-                        : 'Control Center NETSECBR'}
+                        : page === 'help' ? 'Ajuda e Manual de Operação' : 'MARV Command Center'}
             </h1>
           </div>
 
@@ -257,8 +272,14 @@ function App({ account }: { account: CurrentAccount }) {
             orders={orders}
             overduePreventivePlans={overduePreventivePlans}
             upcomingPreventivePlans={upcomingPreventivePlans}
-            onOpenOrders={() => setPage('orders')}
-            onOpenPreventivePlans={() => setPage('preventive_plans')}
+            canOpenOrders={canOpenOrders}
+            canOpenPreventivePlans={canOpenPreventivePlans}
+            onOpenOrders={() => {
+              if (canOpenOrders) setPage('orders');
+            }}
+            onOpenPreventivePlans={() => {
+              if (canOpenPreventivePlans) setPage('preventive_plans');
+            }}
           />
         )}
 
@@ -300,6 +321,8 @@ function App({ account }: { account: CurrentAccount }) {
             canManage={account.isTenantAdmin || account.isNetsecbrAdmin}
           />
         )}
+        {!isLoading && page === 'help' && <HelpCenterPage />}
+
         {!isLoading && page === 'purchases' && (
           <PurchaseManagement
             tenantId={account.tenantId}
@@ -327,15 +350,7 @@ function App({ account }: { account: CurrentAccount }) {
         )}
 
         {!isLoading && page === 'netsecbr_admin' && (
-          <AdminPanel
-            title="Control Center NETSECBR"
-            cards={[
-              'Clientes e tenants',
-              'Planos e contratos',
-              'Financeiro NETSECBR',
-              'Suporte e auditoria',
-            ]}
-          />
+          <CommandCenter isNetsecbrAdmin={account.isNetsecbrAdmin} />
         )}
       </main>
     </div>
@@ -382,6 +397,8 @@ function Dashboard({
   orders,
   overduePreventivePlans,
   upcomingPreventivePlans,
+  canOpenOrders,
+  canOpenPreventivePlans,
   onOpenOrders,
   onOpenPreventivePlans,
 }: {
@@ -389,6 +406,8 @@ function Dashboard({
   orders: WorkOrder[];
   overduePreventivePlans: number;
   upcomingPreventivePlans: UpcomingPreventivePlan[];
+  canOpenOrders: boolean;
+  canOpenPreventivePlans: boolean;
   onOpenOrders: () => void;
   onOpenPreventivePlans: () => void;
 }) {
@@ -397,10 +416,12 @@ function Dashboard({
   return (
     <section className="content admin-panel">
       <div className="quick">
-        <button className="primary" onClick={onOpenOrders}>
-          <Plus size={18} />
-          Ver ordens de serviço
-        </button>
+        {canOpenOrders && (
+          <button className="primary" onClick={onOpenOrders}>
+            <Plus size={18} />
+            Ver ordens de serviço
+          </button>
+        )}
       </div>
 
       <div className="metrics">
@@ -453,9 +474,11 @@ function Dashboard({
               <h2>Ordens prioritárias</h2>
             </div>
 
-            <button onClick={onOpenOrders}>
-              Ver todas <ArrowRight size={16} />
-            </button>
+            {canOpenOrders && (
+              <button onClick={onOpenOrders}>
+                Ver todas <ArrowRight size={16} />
+              </button>
+            )}
           </div>
 
           {orders.slice(0, 3).map((order) => (
@@ -490,9 +513,11 @@ function Dashboard({
               <h2>Próximas preventivas</h2>
             </div>
 
-            <button onClick={onOpenPreventivePlans}>
-              Ver preventivas <ArrowRight size={16} />
-            </button>
+            {canOpenPreventivePlans && (
+              <button onClick={onOpenPreventivePlans}>
+                Ver preventivas <ArrowRight size={16} />
+              </button>
+            )}
           </div>
 
           {upcomingPreventivePlans.length === 0 && (
@@ -530,9 +555,11 @@ function Dashboard({
             <h2>Saúde dos ativos</h2>
           </div>
 
-          <button onClick={onOpenOrders}>
-            Ver ordens <ArrowRight size={16} />
-          </button>
+          {canOpenOrders && (
+            <button onClick={onOpenOrders}>
+              Ver ordens <ArrowRight size={16} />
+            </button>
+          )}
         </div>
 
         <div className="health-row">
@@ -744,6 +771,7 @@ function UserAdmin({
   return (
     <UserAdminModule
       tenantId={tenantId}
+      currentUserId={account.userId}
       currentName={account.fullName}
       currentRole={account.roleLabel}
     />

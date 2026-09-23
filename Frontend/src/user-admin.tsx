@@ -5,6 +5,7 @@ import { KeyRound, LockKeyhole, Power, RefreshCw, UserPlus, X } from 'lucide-rea
 
 type Props = {
   tenantId: string;
+  currentUserId: string;
   currentName: string;
   currentRole: string;
 };
@@ -41,7 +42,7 @@ function formatRole(role: string) {
   return roles[role] || role;
 }
 
-export function UserAdmin({ tenantId, currentName, currentRole }: Props) {
+export function UserAdmin({ tenantId, currentUserId, currentName, currentRole }: Props) {
   const [memberships, setMemberships] = useState<Membership[]>([]);
   const [permissions, setPermissions] = useState<Permission[]>([]);
   const [selectedMember, setSelectedMember] = useState<Membership | null>(null);
@@ -154,6 +155,22 @@ const [newUser, setNewUser] = useState({
   }
 
   async function toggleActive(member: Membership) {
+    if (member.is_active && member.user_id === currentUserId) {
+      setErrorMessage('Você não pode desativar a sua própria conta.');
+      return;
+    }
+
+    const activeTenantAdmins = memberships.filter(
+      (item) => item.role === 'tenant_admin' && item.is_active,
+    ).length;
+
+    if (member.is_active && member.role === 'tenant_admin' && activeTenantAdmins <= 1) {
+      setErrorMessage(
+        'Este cliente precisa de pelo menos um administrador ativo. Ative outro administrador antes de desativar este.',
+      );
+      return;
+    }
+
     setIsSaving(true);
     setMessage('');
     setErrorMessage('');
@@ -180,6 +197,13 @@ const [newUser, setNewUser] = useState({
   async function setTemporaryPassword(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!selectedMember) return;
+
+    if (selectedMember.user_id === currentUserId) {
+      setErrorMessage(
+        'Você não pode redefinir a sua própria senha neste painel. Use a recuperação de acesso.',
+      );
+      return;
+    }
 
     if (temporaryPasswordMode === 'manual' && manualTemporaryPassword.length < 12) {
       setErrorMessage('A senha temporária deve ter pelo menos 12 caracteres.');
@@ -485,6 +509,13 @@ autoComplete="new-password"
               className="secondary button-with-icon"
               disabled={isSaving || !selectedMember.is_active}
               onClick={() => {
+                if (selectedMember.user_id === currentUserId) {
+                  setErrorMessage(
+                    'Você não pode redefinir a sua própria senha neste painel. Use a recuperação de acesso.',
+                  );
+                  return;
+                }
+
                 setIsPasswordResetOpen((current) => !current);
                 setTemporaryPasswordMode('generated');
                 setManualTemporaryPassword('');
