@@ -38,3 +38,4 @@ Toda funcionalidade deve ser pensada para usuários com pouca familiaridade digi
 - Pagamentos, notificações, app Android Flutter, estoque e peças.
 - Ditado de campo com transcrição temporária e aprovação humana.
 - Integrações IIoT, IA e migração planejada para VPS.
+- Validar a estratégia comercial, planos, setup, franquias e precificação antes da publicação da tabela oficial (`documentação/17_Estrategia_Comercial_e_Precificacao.md`).

@@ -350,7 +350,7 @@ function App({ account }: { account: CurrentAccount }) {
         )}
 
         {!isLoading && page === 'netsecbr_admin' && (
-          <CommandCenter isNetsecbrAdmin={account.isNetsecbrAdmin} />
+          <CommandCenter isNetsecbrAdmin={account.isNetsecbrAdmin} currentUserId={account.userId} />
         )}
       </main>
     </div>
