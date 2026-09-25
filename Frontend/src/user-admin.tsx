@@ -1,7 +1,7 @@
 import { type FormEvent, useCallback, useEffect, useState } from 'react';
 import { FunctionsHttpError } from '@supabase/supabase-js';
 import { supabase } from './supabase';
-import { KeyRound, LockKeyhole, Power, RefreshCw, UserPlus, X } from 'lucide-react';
+import { KeyRound, LockKeyhole, RefreshCw, UserPlus, X } from 'lucide-react';
 
 type Props = {
   tenantId: string;
@@ -20,6 +20,8 @@ type Membership = {
   role: string;
   is_active: boolean;
   full_name: string | null;
+  email: string | null;
+  created_at: string | null;
 };
 
 type Permission = {
@@ -42,10 +44,22 @@ function formatRole(role: string) {
   return roles[role] || role;
 }
 
+function formatMemberCreatedAt(createdAt: string | null | undefined) {
+  if (!createdAt) return 'Data não disponível';
+
+  const parsed = new Date(createdAt);
+  if (Number.isNaN(parsed.getTime())) return 'Data não disponível';
+
+  return parsed.toLocaleDateString('pt-BR');
+}
+
 export function UserAdmin({ tenantId, currentUserId, currentName, currentRole }: Props) {
   const [memberships, setMemberships] = useState<Membership[]>([]);
   const [permissions, setPermissions] = useState<Permission[]>([]);
   const [selectedMember, setSelectedMember] = useState<Membership | null>(null);
+  const [editFullName, setEditFullName] = useState('');
+  const [editRole, setEditRole] = useState('navigation');
+  const [editActive, setEditActive] = useState(true);
   const [assignedPermissions, setAssignedPermissions] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
@@ -71,7 +85,7 @@ const [newUser, setNewUser] = useState({
   // 1. Busca os vínculos de usuários deste cliente.
   const { data: members, error: membersError } = await supabase
     .from('tenant_memberships')
-    .select('id, user_id, role, is_active')
+    .select('id, user_id, role, is_active, created_at')
     .eq('tenant_id', tenantId)
     .order('created_at');
 
@@ -106,10 +120,31 @@ const [newUser, setNewUser] = useState({
     (profiles ?? []).map((profile) => [profile.id, profile.full_name]),
   );
 
+  // 3.1 Busca o mapa de e-mails dos membros deste cliente pela Edge Function.
+  const { data: emailData, error: emailsError } = await supabase.functions.invoke(
+    'create-tenant-user',
+    { body: { action: 'list_tenant_user_emails', tenantId } },
+  );
+
+  if (emailsError) {
+    setErrorMessage(
+      `Não foi possível carregar os e-mails dos usuários: ${emailsError.message}`,
+    );
+  }
+
+  const emailsByUserId = new Map<string, string>(
+    !emailsError && emailData?.emails && typeof emailData.emails === 'object'
+      ? Object.entries(emailData.emails as Record<string, unknown>).map(
+          ([userId, value]) => [userId, String(value)] as [string, string],
+        )
+      : [],
+  );
+
   setMemberships(
     (members ?? []).map((member) => ({
       ...member,
       full_name: namesByUserId.get(member.user_id) ?? null,
+      email: emailsByUserId.get(member.user_id) ?? null,
     })) as Membership[],
   );
 
@@ -136,6 +171,9 @@ const [newUser, setNewUser] = useState({
 
   async function selectMember(member: Membership) {
     setSelectedMember(member);
+    setEditFullName(member.full_name ?? '');
+    setEditRole(member.role);
+    setEditActive(member.is_active);
     setMessage('');
     setErrorMessage('');
     setIsPasswordResetOpen(false);
@@ -154,46 +192,6 @@ const [newUser, setNewUser] = useState({
     setAssignedPermissions((data ?? []).map((item) => item.permission_code));
   }
 
-  async function toggleActive(member: Membership) {
-    if (member.is_active && member.user_id === currentUserId) {
-      setErrorMessage('Você não pode desativar a sua própria conta.');
-      return;
-    }
-
-    const activeTenantAdmins = memberships.filter(
-      (item) => item.role === 'tenant_admin' && item.is_active,
-    ).length;
-
-    if (member.is_active && member.role === 'tenant_admin' && activeTenantAdmins <= 1) {
-      setErrorMessage(
-        'Este cliente precisa de pelo menos um administrador ativo. Ative outro administrador antes de desativar este.',
-      );
-      return;
-    }
-
-    setIsSaving(true);
-    setMessage('');
-    setErrorMessage('');
-
-    const { error } = await supabase
-      .from('tenant_memberships')
-      .update({ is_active: !member.is_active })
-      .eq('id', member.id);
-
-    if (error) {
-      setErrorMessage(`Não foi possível atualizar o usuário: ${error.message}`);
-    } else {
-      setMessage(`Usuário ${member.is_active ? 'desativado' : 'ativado'} com sucesso.`);
-      setSelectedMember((current) =>
-        current?.id === member.id
-          ? { ...current, is_active: !member.is_active }
-          : current,
-      );
-      await loadData();
-    }
-
-    setIsSaving(false);
-  }
   async function setTemporaryPassword(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!selectedMember) return;
@@ -280,6 +278,114 @@ const [newUser, setNewUser] = useState({
     }
 
     setIsSaving(false);
+  }
+  async function saveMemberName() {
+    if (!selectedMember) return;
+
+    const nextName = editFullName.trim();
+    const nextRole = editRole === 'tenant_admin' ? 'tenant_admin' : 'navigation';
+    const nextActive = editActive;
+    const nameChanged = nextName !== (selectedMember.full_name ?? '');
+    const roleChanged = nextRole !== selectedMember.role;
+    const activeChanged = nextActive !== selectedMember.is_active;
+
+    if (!nextName) {
+      setErrorMessage('Informe o nome completo.');
+      return;
+    }
+
+    if (!nameChanged && !roleChanged && !activeChanged) return;
+
+    const activeTenantAdmins = memberships.filter(
+      (item) => item.role === 'tenant_admin' && item.is_active,
+    ).length;
+    const isLastActiveTenantAdmin =
+      selectedMember.role === 'tenant_admin' &&
+      selectedMember.is_active &&
+      activeTenantAdmins <= 1;
+
+    if (activeChanged && !nextActive) {
+      if (selectedMember.user_id === currentUserId) {
+        setErrorMessage('Você não pode desativar a sua própria conta.');
+        return;
+      }
+
+      if (isLastActiveTenantAdmin) {
+        setErrorMessage(
+          'Este cliente precisa de pelo menos um administrador ativo. Ative outro administrador antes de desativar este.',
+        );
+        return;
+      }
+    }
+
+    if (roleChanged && isLastActiveTenantAdmin) {
+      setErrorMessage(
+        'Este cliente precisa de pelo menos um administrador ativo. Ative outro administrador antes de alterar este perfil.',
+      );
+      return;
+    }
+
+    setIsSaving(true);
+    setMessage('');
+    setErrorMessage('');
+
+    if (nameChanged) {
+      const { error } = await supabase
+        .from('profiles')
+        .update({ full_name: nextName })
+        .eq('id', selectedMember.user_id);
+
+      if (error) {
+        setErrorMessage(`Não foi possível atualizar o nome: ${error.message}`);
+        setIsSaving(false);
+        return;
+      }
+    }
+
+    if (roleChanged || activeChanged) {
+      const { error } = await supabase
+        .from('tenant_memberships')
+        .update({
+          ...(roleChanged ? { role: nextRole } : {}),
+          ...(activeChanged ? { is_active: nextActive } : {}),
+        })
+        .eq('id', selectedMember.id);
+
+      if (error) {
+        setErrorMessage(`Não foi possível atualizar o usuário: ${error.message}`);
+        setIsSaving(false);
+        return;
+      }
+    }
+
+    setMessage('Dados do usuário atualizados com sucesso.');
+    setSelectedMember((current) =>
+      current?.id === selectedMember.id
+        ? {
+            ...current,
+            full_name: nextName,
+            role: nextRole,
+            is_active: nextActive,
+          }
+        : current,
+    );
+    setEditFullName(nextName);
+    setEditRole(nextRole);
+    setEditActive(nextActive);
+    await loadData();
+
+    setIsSaving(false);
+  }
+
+  function closeDetail() {
+    setSelectedMember(null);
+    setIsPasswordResetOpen(false);
+    setTemporaryPasswordMode('generated');
+    setManualTemporaryPassword('');
+    setIssuedTemporaryPassword('');
+    setEditFullName('');
+    setEditRole('navigation');
+    setEditActive(true);
   }
 async function createUser(event: FormEvent<HTMLFormElement>) {
   event.preventDefault();
@@ -471,7 +577,7 @@ autoComplete="new-password"
                 >
                   {getMemberName(member)}
                 </button>
-                <small>{formatRole(member.role)}</small>
+                <small>{member.email || 'E-mail não disponível'}</small>
               </div>
               <span>{formatRole(member.role)}</span>
               <span className={`badge ${member.is_active ? 'asset-status-active' : 'asset-status-inactive'}`}>
@@ -485,25 +591,90 @@ autoComplete="new-password"
         <section className="panel admin-record-detail">
           <div className="panel-head">
             <div>
-              <p className="eyebrow">PERMISSÕES DO USUÁRIO</p>
+              <p className="eyebrow">DETALHE DO USUÁRIO</p>
               <h2>{getMemberName(selectedMember)}</h2>
             </div>
 
-            <button className="secondary" onClick={() => setSelectedMember(null)}>
+            <button className="secondary" onClick={closeDetail}>
               Voltar para usuários
+              </button>
+              <button className="secondary button-with-icon" onClick={closeDetail}>
+                <X size={17} />
+                Cancelar
             </button>
           </div>
 
-          <div className="form-actions admin-record-actions">
+          <div className="panel-head">
+            <div>
+              <p className="eyebrow">DADOS CADASTRAIS</p>
+              <h3>Dados do usuário</h3>
+            </div>
+          </div>
+
+          <label className="field">
+            <span>Nome completo</span>
+            <input
+              value={editFullName}
+              disabled={isSaving}
+              autoComplete="off"
+              onChange={(event) => setEditFullName(event.target.value)}
+            />
+          </label>
+
+          <div className="form-actions">
             <button
               type="button"
-              className="secondary button-with-icon"
-              disabled={isSaving}
-              onClick={() => void toggleActive(selectedMember)}
+              disabled={
+                isSaving ||
+                !editFullName.trim() ||
+                (editFullName.trim() === (selectedMember.full_name ?? '') &&
+                  editRole === selectedMember.role &&
+                  editActive === selectedMember.is_active)
+              }
+              onClick={() => void saveMemberName()}
             >
-              <Power size={16} />
-              {selectedMember.is_active ? 'Desativar usuário' : 'Ativar usuário'}
+              {isSaving ? 'Salvando...' : 'Salvar alterações'}
             </button>
+          </div>
+
+          <p className="authenticated-user">
+            E-mail: <strong>{selectedMember.email || 'E-mail não disponível'}</strong>
+          </p>
+
+          <label className="field">
+            <span>Perfil</span>
+            <select
+              value={editRole}
+              disabled={isSaving}
+              onChange={(event) => setEditRole(event.target.value)}
+            >
+              <option value="navigation">Navegação</option>
+              <option value="tenant_admin">Administrador do cliente</option>
+            </select>
+          </label>
+
+          <label className="field">
+            <span>Situação</span>
+            <select
+              value={editActive ? 'active' : 'inactive'}
+              disabled={isSaving}
+              onChange={(event) => setEditActive(event.target.value === 'active')}
+            >
+              <option value="active">Ativo</option>
+              <option value="inactive">Inativo</option>
+            </select>
+          </label>
+
+          <label className="field">
+            <span>Data de criação</span>
+            <input readOnly value={formatMemberCreatedAt(selectedMember.created_at)} />
+          </label>
+
+          <p className="authenticated-user">
+            O e-mail é exibido para consulta. A alteração de e-mail não é permitida neste painel.
+          </p>
+
+          <div className="form-actions admin-record-actions">
             <button
               type="button"
               className="secondary button-with-icon"
@@ -599,6 +770,13 @@ autoComplete="new-password"
               </div>
             </form>
           )}
+
+          <div className="panel-head">
+            <div>
+              <p className="eyebrow">PERMISSÕES DO USUÁRIO</p>
+              <h3>Permissões</h3>
+            </div>
+          </div>
 
           {permissions.map((permission) => (
             <label className="permission-option" key={permission.code}>

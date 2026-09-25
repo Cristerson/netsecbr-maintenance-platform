@@ -25,6 +25,8 @@ Deno.serve(async (request) => {
   if (request.method === 'OPTIONS') return new Response('ok', { headers })
   if (request.method !== 'POST') return response({ error: 'Método não permitido.' }, 405, headers)
 
+  let action = ''
+
   try {
     const authorization = request.headers.get('Authorization')
     if (!authorization) return response({ error: 'Usuário não autenticado.' }, 401, headers)
@@ -39,6 +41,72 @@ Deno.serve(async (request) => {
     if (callerError || !caller) return response({ error: 'Sessão inválida.' }, 401, headers)
 
     const body = await request.json()
+    action = String(body.action ?? '')
+
+    // Ação somente de leitura: retorna apenas os e-mails dos membros do tenant
+    // solicitado, para administradores autorizados. Nunca expõe senha, token,
+    // metadados sensíveis ou usuários de outros tenants.
+    if (action === 'list_tenant_user_emails') {
+      const listTenantId = String(body.tenantId ?? '')
+      if (!listTenantId) return response({ error: 'Cliente é obrigatório.' }, 400, headers)
+
+      const admin = createClient(supabaseUrl, serviceRoleKey)
+      const [
+        { data: profileRow, error: profileError },
+        { data: membershipRow, error: membershipError },
+        { data: platformAccessRow, error: platformAccessError },
+      ] = await Promise.all([
+        admin
+          .from('profiles')
+          .select('platform_role, is_active')
+          .eq('id', caller.id)
+          .maybeSingle(),
+        admin
+          .from('tenant_memberships')
+          .select('id')
+          .eq('tenant_id', listTenantId)
+          .eq('user_id', caller.id)
+          .eq('role', 'tenant_admin')
+          .eq('is_active', true)
+          .maybeSingle(),
+        admin
+          .from('platform_access_roles')
+          .select('user_id')
+          .eq('user_id', caller.id)
+          .in('role', ['owner', 'operator'])
+          .eq('is_active', true)
+          .maybeSingle(),
+      ])
+
+      if (profileError || membershipError || platformAccessError) {
+        return response({ error: 'Não foi possível validar a sua permissão.' }, 500, headers)
+      }
+
+      const isNetsecbrAdmin = profileRow?.platform_role === 'netsecbr_admin' && profileRow.is_active && Boolean(platformAccessRow)
+      if (!isNetsecbrAdmin && !membershipRow) {
+        return response({ error: 'Você não tem permissão para ver os e-mails deste cliente.' }, 403, headers)
+      }
+
+      const { data: members, error: membersError } = await admin
+        .from('tenant_memberships')
+        .select('user_id')
+        .eq('tenant_id', listTenantId)
+      if (membersError) {
+        return response({ error: 'Não foi possível carregar os usuários do cliente.' }, 500, headers)
+      }
+
+      const emails: Record<string, string> = {}
+      await Promise.all(
+        (members ?? []).map(async (member: { user_id: string }) => {
+          const { data: authData, error: authError } = await admin.auth.admin.getUserById(member.user_id)
+          const resolvedEmail = authData?.user?.email
+          if (!authError && resolvedEmail) emails[member.user_id] = resolvedEmail
+        }),
+      )
+
+      return response({ emails }, 200, headers)
+    }
+
     const tenantId = String(body.tenantId ?? '')
     const fullName = String(body.fullName ?? '').trim()
     const email = String(body.email ?? '').trim().toLowerCase()
@@ -68,6 +136,7 @@ Deno.serve(async (request) => {
     const [
       { data: callerProfile, error: callerProfileError },
       { data: callerMembership, error: membershipError },
+      { data: callerPlatformAccess, error: platformAccessError },
     ] = await Promise.all([
       supabaseAdmin
         .from('profiles')
@@ -82,13 +151,20 @@ Deno.serve(async (request) => {
         .eq('role', 'tenant_admin')
         .eq('is_active', true)
         .maybeSingle(),
+      supabaseAdmin
+        .from('platform_access_roles')
+        .select('user_id')
+        .eq('user_id', caller.id)
+        .in('role', ['owner', 'operator'])
+        .eq('is_active', true)
+        .maybeSingle(),
     ])
 
-    if (callerProfileError) {
+    if (callerProfileError || membershipError || platformAccessError) {
       return response({ error: 'Não foi possível validar o seu perfil.' }, 500, headers)
     }
 
-    const isNetsecbrAdmin = callerProfile?.platform_role === 'netsecbr_admin' && callerProfile.is_active
+    const isNetsecbrAdmin = callerProfile?.platform_role === 'netsecbr_admin' && callerProfile.is_active && Boolean(callerPlatformAccess)
     if (!isNetsecbrAdmin && !callerMembership) {
       return response({ error: 'Você não tem permissão para cadastrar usuários neste cliente.' }, 403, headers)
     }
@@ -125,6 +201,10 @@ Deno.serve(async (request) => {
 
     return response({ success: true, user: { id: created.user.id, fullName, email, role } }, 201, headers)
   } catch {
-    return response({ error: 'Ocorreu um erro inesperado ao cadastrar o usuário.' }, 500, headers)
+    return response({
+      error: action === 'list_tenant_user_emails'
+        ? 'Ocorreu um erro inesperado ao carregar os e-mails.'
+        : 'Ocorreu um erro inesperado ao cadastrar o usuário.',
+    }, 500, headers)
   }
 })
