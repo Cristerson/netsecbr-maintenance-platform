@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { supabase } from './supabase';
 
 export type OperationalAsset = {
@@ -45,7 +45,40 @@ export function useOperationalData(tenantId: string) {
   // visíveis até os novos chegarem (sem polling e sem Realtime).
   const hasInitialLoadCompleted = useRef(false);
 
+  // Guarda de concorrência: cada carga recebe um identificador crescente e só a
+  // execução mais recente pode aplicar estado. Respostas antigas são descartadas.
+  const latestRequestId = useRef(0);
+
+  // Tenant da carga atualmente válida: permite detectar a troca de tenant dentro
+  // do próprio hook, sem depender do componente que o consome.
+  const loadedTenantId = useRef(tenantId);
+
+  // Troca de tenant (ou de usuário, que também troca o tenant): invalida
+  // respostas em voo, volta ao estado de carga inicial e descarta os dados do
+  // tenant anterior para que nunca sejam exibidos como se fossem do tenant novo.
+  useEffect(() => {
+    if (loadedTenantId.current === tenantId) return;
+
+    loadedTenantId.current = tenantId;
+    hasInitialLoadCompleted.current = false;
+    latestRequestId.current += 1;
+
+    setAssets([]);
+    setOrders([]);
+    setOverduePreventivePlans(0);
+    setUpcomingPreventivePlans([]);
+    setError('');
+    setIsLoading(true);
+  }, [tenantId]);
+
   const load = useCallback(async () => {
+    const requestId = latestRequestId.current + 1;
+    latestRequestId.current = requestId;
+
+    // Vale para todo setState assíncrono abaixo: se outra carga começou depois,
+    // esta execução está obsoleta e não pode mais alterar o estado.
+    const isLatestRequest = () => latestRequestId.current === requestId;
+
     setError('');
 
     if (!hasInitialLoadCompleted.current) {
@@ -64,6 +97,9 @@ export function useOperationalData(tenantId: string) {
         .order('next_due_date', { ascending: true })
         .limit(3),
     ]);
+
+    // Resposta de uma carga já substituída por outra mais recente: descarta em silêncio.
+    if (!isLatestRequest()) return;
 
     if (assetsError || ordersError || plansError || upcomingPlansError) {
       setError('Não foi possível carregar os dados operacionais agora. Atualize a página e tente novamente.');

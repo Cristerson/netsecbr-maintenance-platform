@@ -1,10 +1,10 @@
 import { createClient } from 'npm:@supabase/supabase-js@2'
 
-const allowedOrigins = ['http://localhost:5173']
+const allowedOrigins = (Deno.env.get('ALLOWED_ORIGINS') ?? 'http://localhost:5173').split(',').map((origin) => origin.trim()).filter(Boolean)
 
 function corsHeaders(origin: string | null) {
-  const allowedOrigin = allowedOrigins.includes(origin ?? '')
-    ? origin!
+  const allowedOrigin = origin && allowedOrigins.includes(origin)
+    ? origin
     : allowedOrigins[0]
 
   return {
@@ -12,6 +12,7 @@ function corsHeaders(origin: string | null) {
     'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
     'Access-Control-Allow-Methods': 'POST, OPTIONS',
     'Content-Type': 'application/json',
+    'Vary': 'Origin',
   }
 }
 

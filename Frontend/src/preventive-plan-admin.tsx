@@ -131,24 +131,19 @@ export function PreventivePlanAdmin({ tenantId, canManage }: Props) {
     setIsLoading(true);
     setErrorMessage('');
 
-    const { data: plansData, error: plansError } = await supabase
-      .from('maintenance_plans')
-      .select(
-        'id, tenant_id, asset_id, name, periodicity_days, next_due_date, assigned_to, is_active, notes, created_at, updated_at, assets(name, code)',
-      )
-      .eq('tenant_id', tenantId)
-      .order('next_due_date');
-
-    if (plansError) {
-      setErrorMessage(`Não foi possível carregar os planos preventivos: ${plansError.message}`);
-      setIsLoading(false);
-      return;
-    }
-
+    // As três consultas são independentes: partem juntas e são aguardadas juntas.
     const [
+      { data: plansData, error: plansError },
       { data: assetData, error: assetError },
       { data: membershipData, error: membershipError },
     ] = await Promise.all([
+      supabase
+        .from('maintenance_plans')
+        .select(
+          'id, tenant_id, asset_id, name, periodicity_days, next_due_date, assigned_to, is_active, notes, created_at, updated_at, assets(name, code)',
+        )
+        .eq('tenant_id', tenantId)
+        .order('next_due_date'),
       supabase
         .from('assets')
         .select('id, code, name, status')
@@ -161,6 +156,12 @@ export function PreventivePlanAdmin({ tenantId, canManage }: Props) {
         .eq('tenant_id', tenantId)
         .eq('is_active', true),
     ]);
+
+    if (plansError) {
+      setErrorMessage(`Não foi possível carregar os planos preventivos: ${plansError.message}`);
+      setIsLoading(false);
+      return;
+    }
 
     if (assetError || membershipError) {
       setErrorMessage(

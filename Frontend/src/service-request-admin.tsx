@@ -134,45 +134,49 @@ export function ServiceRequestAdmin({
     setIsLoading(true);
     setErrorMessage('');
 
-    const { data: requestsData, error: requestsError } = await supabase
-      .from('service_requests')
-      .select(
+    // As quatro consultas são independentes: partem juntas e são aguardadas juntas.
+    const [
+      { data: requestsData, error: requestsError },
+      { data: unitData, error: unitError },
+      { data: costCenterData, error: costCenterError },
+      { data: assetData, error: assetError },
+    ] = await Promise.all([
+      supabase
+        .from('service_requests')
+        .select(
         `id, request_number, tenant_id, unit_id, cost_center_id, asset_id, title, description, category, priority, status, requested_by, requested_at, converted_to_work_order_id, triage_notes, estimated_service_cost_cents, estimated_material_cost_cents, estimated_total_cost_cents, triaged_at, triaged_by, approved_at, approved_by,
         assets(name),
         units(name),
         cost_centers(name),
         requested_profile:profiles!service_requests_requested_by_fkey(full_name),
         converted_wo:work_orders!service_requests_converted_to_work_order_id_fkey(order_number)`,
-      )
-      .eq('tenant_id', tenantId)
-      .order('requested_at', { ascending: false })
-      .limit(200);
+        )
+        .eq('tenant_id', tenantId)
+        .order('requested_at', { ascending: false })
+        .limit(200),
+      supabase
+        .from('units')
+        .select('id, cost_center_id, code, name, is_active')
+        .eq('tenant_id', tenantId)
+        .order('name'),
+      supabase
+        .from('cost_centers')
+        .select('id, code, name, is_active')
+        .eq('tenant_id', tenantId)
+        .order('name'),
+      supabase
+        .from('assets')
+        .select('id, code, name, unit_id, cost_center_id, status')
+        .eq('tenant_id', tenantId)
+        .is('deleted_at', null)
+        .order('name'),
+    ]);
 
     if (requestsError) {
       setErrorMessage(`Não foi possível carregar as solicitações: ${requestsError.message}`);
       setIsLoading(false);
       return;
     }
-
-    const [{ data: unitData, error: unitError }, { data: costCenterData, error: costCenterError }, { data: assetData, error: assetError }] =
-      await Promise.all([
-        supabase
-          .from('units')
-          .select('id, cost_center_id, code, name, is_active')
-          .eq('tenant_id', tenantId)
-          .order('name'),
-        supabase
-          .from('cost_centers')
-          .select('id, code, name, is_active')
-          .eq('tenant_id', tenantId)
-          .order('name'),
-        supabase
-          .from('assets')
-          .select('id, code, name, unit_id, cost_center_id, status')
-          .eq('tenant_id', tenantId)
-          .is('deleted_at', null)
-          .order('name'),
-      ]);
 
     if (unitError || costCenterError || assetError) {
       setErrorMessage(

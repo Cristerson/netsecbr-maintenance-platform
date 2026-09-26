@@ -48,9 +48,3 @@ $$;
 revoke all on function public.sync_work_order_material_status() from public;
 revoke all on function public.sync_work_order_material_status() from anon;
 revoke all on function public.sync_work_order_material_status() from authenticated;
-
-create trigger purchase_requests_sync_work_order_material_status
-  after insert or update of status
-  on public.purchase_requests
-  for each row
-  execute function public.sync_work_order_material_status();

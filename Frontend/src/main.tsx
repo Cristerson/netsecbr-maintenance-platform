@@ -264,7 +264,9 @@ function App({ account }: { account: CurrentAccount }) {
         </header>
 
         {error && <p className="data-error">{error}</p>}
-        {isLoading && <p className="data-loading">Carregando dados do cliente…</p>}
+        {page === 'dashboard' && isLoading && (
+          <p className="data-loading">Carregando dados do cliente…</p>
+        )}
 
         {!isLoading && page === 'dashboard' && (
           <Dashboard

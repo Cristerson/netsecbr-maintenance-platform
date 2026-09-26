@@ -114,25 +114,3 @@ from public.profiles profile_row
 where profile_row.platform_role = 'netsecbr_admin'
   and profile_row.is_active = true
 on conflict (user_id) do nothing;
-
-do $$
-declare
-  initial_owner_id uuid;
-begin
-  select profile_row.id
-    into initial_owner_id
-  from public.profiles profile_row
-  join auth.users auth_user on auth_user.id = profile_row.id
-  where lower(auth_user.email) = 'cristerson.castelanno@netsecbr.com.br'
-    and profile_row.platform_role = 'netsecbr_admin'
-    and profile_row.is_active = true;
-
-  if initial_owner_id is null then
-    raise exception 'Não foi possível localizar o Proprietário inicial informado.';
-  end if;
-
-  update public.platform_access_roles
-  set role = 'owner', is_active = true, updated_at = now()
-  where user_id = initial_owner_id;
-end;
-$$;

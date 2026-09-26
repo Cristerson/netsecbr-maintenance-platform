@@ -120,6 +120,12 @@ create trigger purchase_requests_validate_scope
   before insert or update on public.purchase_requests
   for each row execute procedure public.validate_purchase_request_scope();
 
+create trigger purchase_requests_sync_work_order_material_status
+  after insert or update of status
+  on public.purchase_requests
+  for each row
+  execute function public.sync_work_order_material_status();
+
 alter table public.purchase_requests enable row level security;
 alter table public.purchase_request_items enable row level security;
 

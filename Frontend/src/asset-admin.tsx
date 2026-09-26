@@ -99,8 +99,11 @@ export function AssetAdmin({ tenantId, canManage }: Props) {
   const [errorMessage, setErrorMessage] = useState('');
   const isDetailView = isFormOpen && editingAsset !== null;
 
-  const loadData = useCallback(async () => {
-    setIsLoading(true);
+  // A recarga silenciosa mantém a lista atual visível enquanto os dados novos chegam.
+  const loadData = useCallback(async (silent = false) => {
+    if (!silent) {
+      setIsLoading(true);
+    }
     setErrorMessage('');
 
     const [
@@ -143,8 +146,10 @@ export function AssetAdmin({ tenantId, canManage }: Props) {
           costCenterError?.message
         }`,
       );
-      setIsLoading(false);
-        
+      if (!silent) {
+        setIsLoading(false);
+      }
+
       return;
     }
 
@@ -152,7 +157,10 @@ export function AssetAdmin({ tenantId, canManage }: Props) {
     setCategories((categoryData ?? []) as AssetCategory[]);
     setUnits((unitData ?? []) as Unit[]);
     setCostCenters((costCenterData ?? []) as CostCenter[]);
-    setIsLoading(false);
+
+    if (!silent) {
+      setIsLoading(false);
+    }
   }, [tenantId]);
 
   useEffect(() => {
@@ -304,7 +312,7 @@ export function AssetAdmin({ tenantId, canManage }: Props) {
           : 'Ativo cadastrado com sucesso.',
       );
       setIsFormOpen(false);
-      await loadData();
+      await loadData(true);
     }
 
     setIsSaving(false);
@@ -330,7 +338,7 @@ export function AssetAdmin({ tenantId, canManage }: Props) {
       setErrorMessage(`Não foi possível atualizar o ativo: ${error.message}`);
     } else {
       setMessage(`Ativo ${asset.status === 'active' ? 'desativado' : 'ativado'} com sucesso.`);
-      await loadData();
+      await loadData(true);
     }
 
     setIsSaving(false);
@@ -360,7 +368,7 @@ export function AssetAdmin({ tenantId, canManage }: Props) {
       setMessage('Ativo excluído com sucesso.');
       setIsFormOpen(false);
       setEditingAsset(null);
-      await loadData();
+      await loadData(true);
     }
 
     setIsSaving(false);
@@ -372,7 +380,7 @@ export function AssetAdmin({ tenantId, canManage }: Props) {
         canManage={canManage}
         onClose={() => {
           setIsCategoryAdminOpen(false);
-          void loadData();
+          void loadData(true);
         }}
       />
     );
