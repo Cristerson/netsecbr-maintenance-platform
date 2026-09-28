@@ -289,6 +289,49 @@ export function HelpCenterPage() {
         </div>
       </div>
 
+      <div className="panel" style={{ marginBottom: 18 }}>
+        <p className="eyebrow">VISÃO GERAL</p>
+        <h3 style={{ margin: '0 0 6px' }}>
+          Como funciona o ciclo de manutenção no MARV
+        </h3>
+
+        <img
+          src="/manual/ciclo-manutencao-marv.png"
+          alt="Fluxo completo de manutenção no MARV: da identificação da necessidade ao histórico e às preventivas."
+          style={{
+            display: 'block',
+            width: '100%',
+            height: 'auto',
+            border: '1px solid #e0e8f2',
+            borderRadius: 10,
+            margin: '10px 0 12px',
+          }}
+        />
+
+        <p style={{ color: '#3f5372', margin: '0 0 10px' }}>
+          O MARV organiza o ciclo de manutenção desde a identificação de uma
+          necessidade, abertura e triagem da solicitação, planejamento e
+          execução da ordem de serviço, até a validação, o histórico e o apoio à
+          programação de novas ações.
+        </p>
+
+        <div
+          style={{
+            background: '#fff7e8',
+            border: '1px solid #f0d9ae',
+            borderRadius: 8,
+            padding: '10px 12px',
+            fontSize: 12,
+            color: '#6b4d16',
+          }}
+        >
+          <strong style={{ color: '#8a5a10' }}>Aviso:</strong> Horímetro e
+          temperatura podem ser registrados manualmente no ativo. Recursos de
+          foto, OCR e integração IoT estão planejados para evolução futura e não
+          devem ser apresentados como funcionalidades já ativas.
+        </div>
+      </div>
+
       <div
         style={{
           display: 'grid',

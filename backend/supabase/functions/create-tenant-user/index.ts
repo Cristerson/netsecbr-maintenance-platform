@@ -105,7 +105,133 @@ Deno.serve(async (request) => {
         }),
       )
 
-      return response({ emails }, 200, headers)
+      // Nomes dos membros pelo cliente server-side (service role): o administrador
+      // do tenant não consegue ler profiles de outros membros pela RLS, então o
+      // mapa de nomes é montado aqui. Retorna apenas userId -> full_name (ou null)
+      // dos membros do tenant solicitado — nunca senha, token, metadados sensíveis
+      // ou dados de outros tenants.
+      const memberIds = (members ?? []).map((member) => member.user_id)
+      const fullNames: Record<string, string | null> = {}
+      for (const userId of memberIds) fullNames[userId] = null
+
+      if (memberIds.length > 0) {
+        const { data: profileRows, error: profileListError } = await admin
+          .from('profiles')
+          .select('id, full_name')
+          .in('id', memberIds)
+
+        if (profileListError) {
+          return response({ error: 'Não foi possível carregar os nomes dos usuários.' }, 500, headers)
+        }
+
+        for (const profile of profileRows ?? []) {
+          fullNames[profile.id] = profile.full_name ?? null
+        }
+      }
+
+      return response({ emails, fullNames }, 200, headers)
+    }
+
+    // Atualização do nome de um membro do tenant. Altera SOMENTE
+    // public.profiles.full_name pelo cliente server-side (a RLS impede o
+    // tenant_admin de escrever diretamente em profiles de outros membros).
+    // Não toca em e-mail, senha, platform_role, is_active global ou outros campos.
+    if (action === 'update_tenant_user_name') {
+      const targetTenantId = String(body.tenantId ?? '')
+      const targetUserId = String(body.userId ?? '')
+      const nextFullName = String(body.fullName ?? '').trim()
+
+      if (!targetTenantId) return response({ error: 'Cliente é obrigatório.' }, 400, headers)
+      if (!targetUserId) return response({ error: 'Usuário é obrigatório.' }, 400, headers)
+      if (!nextFullName) return response({ error: 'Informe o nome do usuário.' }, 400, headers)
+      if (nextFullName.length > 120) return response({ error: 'O nome deve ter no máximo 120 caracteres.' }, 400, headers)
+
+      const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey)
+      const [
+        { data: callerProfile, error: callerProfileError },
+        { data: callerMembership, error: membershipError },
+        { data: callerPlatformAccess, error: platformAccessError },
+      ] = await Promise.all([
+        supabaseAdmin
+          .from('profiles')
+          .select('platform_role, is_active')
+          .eq('id', caller.id)
+          .maybeSingle(),
+        supabaseAdmin
+          .from('tenant_memberships')
+          .select('id')
+          .eq('tenant_id', targetTenantId)
+          .eq('user_id', caller.id)
+          .eq('role', 'tenant_admin')
+          .eq('is_active', true)
+          .maybeSingle(),
+        supabaseAdmin
+          .from('platform_access_roles')
+          .select('user_id')
+          .eq('user_id', caller.id)
+          .in('role', ['owner', 'operator'])
+          .eq('is_active', true)
+          .maybeSingle(),
+      ])
+
+      if (callerProfileError || membershipError || platformAccessError) {
+        return response({ error: 'Não foi possível validar o seu perfil.' }, 500, headers)
+      }
+
+      const isNetsecbrAdmin = callerProfile?.platform_role === 'netsecbr_admin' && callerProfile.is_active && Boolean(callerPlatformAccess)
+      if (!isNetsecbrAdmin && !callerMembership) {
+        return response({ error: 'Você não tem permissão para alterar nomes de usuários neste cliente.' }, 403, headers)
+      }
+
+      const { data: targetMembership, error: targetMembershipError } = await supabaseAdmin
+        .from('tenant_memberships')
+        .select('id')
+        .eq('tenant_id', targetTenantId)
+        .eq('user_id', targetUserId)
+        .maybeSingle()
+
+      if (targetMembershipError) {
+        return response({ error: 'Não foi possível validar o usuário alvo.' }, 500, headers)
+      }
+      if (!targetMembership) {
+        return response({ error: 'Este usuário não pertence a este cliente.' }, 404, headers)
+      }
+
+      const { data: currentProfile, error: currentProfileError } = await supabaseAdmin
+        .from('profiles')
+        .select('full_name')
+        .eq('id', targetUserId)
+        .maybeSingle()
+
+      if (currentProfileError) {
+        return response({ error: 'Não foi possível carregar o nome atual do usuário.' }, 500, headers)
+      }
+      if (!currentProfile) {
+        return response({ error: 'Perfil do usuário não encontrado.' }, 404, headers)
+      }
+
+      const { data: updatedProfile, error: updateError } = await supabaseAdmin
+        .from('profiles')
+        .update({ full_name: nextFullName })
+        .eq('id', targetUserId)
+        .select('id')
+        .maybeSingle()
+
+      if (updateError || !updatedProfile) {
+        return response({ error: 'Não foi possível salvar o nome do usuário.' }, 500, headers)
+      }
+
+      const { error: auditError } = await supabaseAdmin.from('audit_logs').insert({
+        tenant_id: targetTenantId,
+        actor_id: caller.id,
+        action: 'tenant_user_name_updated',
+        resource_type: 'profile',
+        resource_id: targetUserId,
+        metadata: { previousFullName: currentProfile.full_name, newFullName: nextFullName },
+      })
+      if (auditError) console.error('Tenant user name audit could not be recorded', auditError.message)
+
+      return response({ success: true, fullName: nextFullName }, 200, headers)
     }
 
     const tenantId = String(body.tenantId ?? '')
@@ -205,7 +331,9 @@ Deno.serve(async (request) => {
     return response({
       error: action === 'list_tenant_user_emails'
         ? 'Ocorreu um erro inesperado ao carregar os e-mails.'
-        : 'Ocorreu um erro inesperado ao cadastrar o usuário.',
+        : action === 'update_tenant_user_name'
+          ? 'Ocorreu um erro inesperado ao atualizar o nome do usuário.'
+          : 'Ocorreu um erro inesperado ao cadastrar o usuário.',
     }, 500, headers)
   }
 })

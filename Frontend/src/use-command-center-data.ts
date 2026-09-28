@@ -55,6 +55,32 @@ export type CommandCenterEntitlement = {
   unit: 'count' | 'bytes' | 'boolean' | null;
 };
 
+export type CommandCenterAccessActivity = {
+  id: string;
+  userId: string;
+  fullName: string;
+  deviceLabel: string;
+  accessOrigin: string;
+  startedAt: string;
+  lastSeenAt: string;
+};
+
+export type CommandCenterConsumptionItem = {
+  tenantId: string;
+  legalName: string;
+  tradeName: string;
+  tenantStatus: string;
+  subscriptionId: string | null;
+  subscriptionStatus: string | null;
+  code: string;
+  name: string;
+  unit: 'count' | 'bytes' | 'boolean';
+  limitValue: number | null;
+  isUnlimited: boolean;
+  isConfigured: boolean;
+  consumedValue: number;
+};
+
 export type CommandCenterTenantDetail = {
   tenantId: string;
   accessStatus: string;
@@ -64,6 +90,7 @@ export type CommandCenterTenantDetail = {
   activeUnitsCount: number;
   activeCostCentersCount: number;
   entitlements: CommandCenterEntitlement[];
+  recentAccessActivities: CommandCenterAccessActivity[];
 };
 
 export type CommandCenterTenantUpdateInput = {
@@ -193,6 +220,68 @@ export function useCommandCenterData() {
   return { tenants, totals, isLoading, error, reload };
 }
 
+export function useCommandCenterConsumption() {
+  const [items, setItems] = useState<CommandCenterConsumptionItem[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState('');
+  const hasInitialLoadCompleted = useRef(false);
+
+  const reload = useCallback(async () => {
+    setError('');
+    if (!hasInitialLoadCompleted.current) setIsLoading(true);
+
+    const { data, error: rpcError } = await supabase.rpc('get_command_center_consumption');
+    if (rpcError) {
+      setError(
+        rpcError.message.includes('Acesso negado')
+          ? 'Acesso negado às franquias e consumo.'
+          : 'Não foi possível carregar o consumo dos clientes agora. Tente novamente.',
+      );
+      hasInitialLoadCompleted.current = true;
+      setIsLoading(false);
+      return;
+    }
+
+    setItems(((data ?? []) as Array<{
+      tenant_id: string;
+      legal_name: string;
+      trade_name: string;
+      tenant_status: string;
+      subscription_id: string | null;
+      subscription_status: string | null;
+      entitlement_code: string;
+      entitlement_name: string;
+      entitlement_unit: 'count' | 'bytes' | 'boolean';
+      limit_value: number | null;
+      is_unlimited: boolean;
+      is_configured: boolean;
+      consumed_value: number;
+    }>).map((row) => ({
+      tenantId: row.tenant_id,
+      legalName: row.legal_name,
+      tradeName: row.trade_name,
+      tenantStatus: row.tenant_status,
+      subscriptionId: row.subscription_id,
+      subscriptionStatus: row.subscription_status,
+      code: row.entitlement_code,
+      name: row.entitlement_name,
+      unit: row.entitlement_unit,
+      limitValue: row.limit_value === null ? null : toNumber(row.limit_value),
+      isUnlimited: row.is_unlimited,
+      isConfigured: row.is_configured,
+      consumedValue: toNumber(row.consumed_value),
+    })));
+    hasInitialLoadCompleted.current = true;
+    setIsLoading(false);
+  }, []);
+
+  useEffect(() => {
+    void reload();
+  }, [reload]);
+
+  return { items, isLoading, error, reload };
+}
+
 export async function updateCommandCenterTenant(input: CommandCenterTenantUpdateInput) {
   const { data, error } = await supabase.rpc('update_command_center_tenant', {
     target_tenant_id: input.tenantId,
@@ -208,6 +297,38 @@ export async function updateCommandCenterTenant(input: CommandCenterTenantUpdate
   return (data ?? [])[0] ?? null;
 }
 
+
+export type CommandCenterTenantCreateInput = {
+  legalName: string;
+  tradeName: string;
+  documentNumber: string;
+  status: string;
+  contactFullName: string;
+  contactEmail: string;
+  contactPhone: string;
+  extraDomains: string[];
+};
+
+// Criação de cliente pelo Command Center: a RPC grava cliente, contato
+// principal e domínios autorizados na mesma transação e audita.
+// Não cria contrato, plano, usuário e não mexe em Auth.
+export async function createCommandCenterTenant(input: CommandCenterTenantCreateInput) {
+  const { data, error } = await supabase.rpc('create_command_center_tenant', {
+    target_legal_name: input.legalName,
+    target_trade_name: input.tradeName,
+    target_document_number: input.documentNumber,
+    target_status: input.status,
+    target_contact_full_name: input.contactFullName,
+    target_contact_email: input.contactEmail,
+    target_contact_phone: input.contactPhone,
+    extra_domains: input.extraDomains,
+    change_reason: null,
+  });
+
+  if (error) throw new Error(error.message);
+
+  return (data ?? [])[0] ?? null;
+}
 
 export function useCommandCenterTenantDetail(tenantId: string | null) {
   const [detail, setDetail] = useState<CommandCenterTenantDetail | null>(null);
@@ -226,7 +347,7 @@ export function useCommandCenterTenantDetail(tenantId: string | null) {
     setDetail(null);
     setError('');
 
-    const [tenantResult, subscriptionResult, membershipsResult, unitsResult, costCentersResult] =
+    const [tenantResult, subscriptionResult, membershipsResult, unitsResult, costCentersResult, accessActivityResult] =
       await Promise.all([
         supabase
           .from('tenants')
@@ -263,9 +384,17 @@ export function useCommandCenterTenantDetail(tenantId: string | null) {
           .select('id')
           .eq('tenant_id', tenantId)
           .eq('is_active', true),
+
+        supabase
+          .from('tenant_access_activity')
+          .select('id, user_id, device_label, access_origin, started_at, last_seen_at')
+          .eq('tenant_id', tenantId)
+          .gte('last_seen_at', new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString())
+          .order('last_seen_at', { ascending: false })
+          .limit(30),
       ]);
 
-    if (tenantResult.error || subscriptionResult.error || membershipsResult.error || unitsResult.error || costCentersResult.error) {
+    if (tenantResult.error || subscriptionResult.error || membershipsResult.error || unitsResult.error || costCentersResult.error || accessActivityResult.error) {
       setError('Não foi possível carregar os dados SaaS deste cliente. Tente novamente.');
       setIsLoading(false);
       return;
@@ -284,9 +413,20 @@ export function useCommandCenterTenantDetail(tenantId: string | null) {
       role: string;
       is_active: boolean;
     }>;
-    const administratorIds = memberships.map((membership) => membership.user_id);
-    const profilesResult = administratorIds.length
-      ? await supabase.from('profiles').select('id, full_name').in('id', administratorIds)
+    const accessActivityRows = (accessActivityResult.data ?? []) as Array<{
+      id: string;
+      user_id: string;
+      device_label: string;
+      access_origin: string;
+      started_at: string;
+      last_seen_at: string;
+    }>;
+    const profileIds = [...new Set([
+      ...memberships.map((membership) => membership.user_id),
+      ...accessActivityRows.map((activity) => activity.user_id),
+    ])];
+    const profilesResult = profileIds.length
+      ? await supabase.from('profiles').select('id, full_name').in('id', profileIds)
       : { data: [], error: null };
 
     if (profilesResult.error) {
@@ -368,6 +508,15 @@ export function useCommandCenterTenantDetail(tenantId: string | null) {
       })),
       activeUnitsCount: (unitsResult.data ?? []).length,
       activeCostCentersCount: (costCentersResult.data ?? []).length,
+      recentAccessActivities: accessActivityRows.map((activity) => ({
+        id: activity.id,
+        userId: activity.user_id,
+        fullName: profilesById.get(activity.user_id) ?? 'Usuário sem nome',
+        deviceLabel: activity.device_label,
+        accessOrigin: activity.access_origin,
+        startedAt: activity.started_at,
+        lastSeenAt: activity.last_seen_at,
+      })),
       entitlements: requiredEntitlementCodes.flatMap((code) => {
         const entitlement = entitlementsByCode.get(code);
         const definition = definitionsByCode.get(code);
@@ -637,4 +786,131 @@ export async function createSubscriptionContract(input: SubscriptionContractInpu
 
   const rows = (data ?? []) as Array<{ subscription_id: string }>;
   return rows[0]?.subscription_id ?? null;
+}
+
+/* --- Franquias e consumo: formatação e situação compartilhadas entre o módulo do
+   Command Center e o detalhe do cliente. --- */
+
+export function formatStorage(bytes: number | null, isUnlimited: boolean) {
+  if (isUnlimited) return 'Ilimitado';
+  if (bytes === null) return '—';
+
+  if (bytes === 0) return '0 B';
+
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  const unitIndex = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+  const value = bytes / 1024 ** unitIndex;
+
+  return `${value.toLocaleString('pt-BR', { maximumFractionDigits: 1 })} ${units[unitIndex]}`;
+}
+
+export function formatEntitlementLimit(entitlement: CommandCenterEntitlement) {
+  if (!entitlement.isConfigured) return 'Não configurada';
+  if (entitlement.isUnlimited) return 'Ilimitado';
+  if (entitlement.limitValue === null) return '—';
+  if (entitlement.unit === 'bytes') {
+    return formatStorage(entitlement.limitValue, false);
+  }
+
+  return entitlement.limitValue.toLocaleString('pt-BR');
+}
+
+export function formatConsumptionValue(value: number, unit: 'count' | 'bytes' | 'boolean') {
+  if (unit === 'bytes') return formatStorage(value, false);
+  if (unit === 'boolean') return value ? 'Sim' : 'Não';
+  return value.toLocaleString('pt-BR');
+}
+
+export type ConsumptionSituation = {
+  label: string;
+  className: string;
+  /* Quanto maior, mais crítica é a situação. Usado para resumir o pior caso do cliente. */
+  severity: number;
+};
+
+export function getConsumptionSituation(item: CommandCenterConsumptionItem): ConsumptionSituation {
+  if (!item.isConfigured) return { label: 'Não configurada', className: 'asset-status-inactive', severity: 2 };
+  if (item.isUnlimited) return { label: 'Ilimitado', className: 'asset-status-active', severity: 0 };
+  if (!item.limitValue || item.limitValue <= 0) {
+    return item.consumedValue > 0
+      ? { label: 'Acima do limite', className: 'asset-status-inactive', severity: 4 }
+      : { label: 'Sem uso', className: 'asset-status-active', severity: 0 };
+  }
+
+  const percentage = item.consumedValue / item.limitValue;
+  if (percentage >= 1) return { label: 'Limite atingido', className: 'asset-status-inactive', severity: 4 };
+  if (percentage >= 0.8) return { label: 'Próximo do limite', className: 'asset-status-inactive', severity: 3 };
+  return { label: 'Dentro da franquia', className: 'asset-status-active', severity: 1 };
+}
+
+export function getWorstConsumptionSituation(items: CommandCenterConsumptionItem[]): ConsumptionSituation {
+  return items.reduce<ConsumptionSituation>(
+    (current, item) => {
+      const situation = getConsumptionSituation(item);
+      return situation.severity > current.severity ? situation : current;
+    },
+    { label: 'Dentro da franquia', className: 'asset-status-active', severity: 1 },
+  );
+}
+
+/* Métricas na ordem fixa exibida nas telas: colunas comparáveis entre clientes. */
+export const consumptionMetrics = [
+  { code: 'robots.registered', label: 'Robôs' },
+  { code: 'storage.bytes', label: 'Armazenamento' },
+  { code: 'units.active', label: 'Unidades' },
+  { code: 'users.active', label: 'Usuários' },
+  { code: 'work_orders.monthly', label: 'OS no mês' },
+];
+
+/* Na lista, o limite só aparece quando existe franquia configurada para a métrica. */
+export function formatConsumptionSummary(item: CommandCenterConsumptionItem | undefined) {
+  if (!item) return '—';
+
+  const consumed = formatConsumptionValue(item.consumedValue, item.unit);
+  if (item.isUnlimited) return consumed + ' / Ilimitado';
+  if (!item.isConfigured || item.limitValue === null || item.limitValue <= 0) return consumed;
+
+  return consumed + ' / ' + formatConsumptionValue(item.limitValue, item.unit);
+}
+export type TenantFranchiseSummary = {
+  itemsByCode: Map<string, CommandCenterConsumptionItem>;
+  worstConfigured: ConsumptionSituation | null;
+  unconfiguredCount: number;
+};
+
+/* Resume a franquia de um cliente: só franquias configuradas contam para o pior caso. */
+export function summarizeTenantFranchise(items: CommandCenterConsumptionItem[]): TenantFranchiseSummary {
+  const configured = items.filter((item) => item.isConfigured);
+  const itemsByCode = new Map<string, CommandCenterConsumptionItem>();
+  items.forEach((item) => itemsByCode.set(item.code, item));
+
+  return {
+    itemsByCode,
+    worstConfigured: configured.length > 0 ? getWorstConsumptionSituation(configured) : null,
+    unconfiguredCount: items.length - configured.length,
+  };
+}
+
+export function summarizeFranchiseByTenant(items: CommandCenterConsumptionItem[]): Map<string, TenantFranchiseSummary> {
+  const byTenant = new Map<string, CommandCenterConsumptionItem[]>();
+  items.forEach((item) => byTenant.set(item.tenantId, [...(byTenant.get(item.tenantId) ?? []), item]));
+
+  const entries: Array<[string, TenantFranchiseSummary]> = [...byTenant.entries()].map(
+    ([tenantId, tenantItems]) => [tenantId, summarizeTenantFranchise(tenantItems)],
+  );
+
+  return new Map(entries);
+}
+
+export type FranchiseFilter = 'attention' | 'ok' | 'unconfigured';
+
+export function matchesFranchiseFilter(
+  summary: TenantFranchiseSummary | undefined,
+  filter: FranchiseFilter,
+) {
+  if (!summary) return false;
+  if (filter === 'attention') return summary.worstConfigured !== null && summary.worstConfigured.severity >= 3;
+  if (filter === 'ok') return summary.worstConfigured !== null && summary.worstConfigured.severity <= 1;
+
+  return summary.worstConfigured === null;
 }

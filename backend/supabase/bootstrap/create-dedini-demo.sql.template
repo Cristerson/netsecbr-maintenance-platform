@@ -1,0 +1,406 @@
+-- Carga demonstrativa idempotente da Dedini para o MARV.
+-- Uso previsto: SQL Editor/CLI administrativo, depois de aplicar a migration
+-- 20260927210957_add_asset_operational_readings.sql.
+-- Não cria usuário em auth.users e não contém senha. O usuário demo deve ser
+-- criado pela Edge Function create-tenant-user, preservando Auth e auditoria.
+
+do $$
+declare
+  actor_id uuid;
+  dedini_tenant_id uuid;
+  cost_center_id uuid;
+  unit_id uuid;
+  press_category_id uuid;
+  robot_category_id uuid;
+  press_id uuid;
+  robot_id uuid;
+  demo_plan_id uuid;
+begin
+  select profile_row.id
+    into actor_id
+  from public.profiles profile_row
+  join public.platform_access_roles access_role
+    on access_role.user_id = profile_row.id
+  where profile_row.platform_role = 'netsecbr_admin'
+    and profile_row.is_active = true
+    and access_role.role = 'owner'
+    and access_role.is_active = true
+  order by profile_row.created_at
+  limit 1;
+
+  if actor_id is null then
+    raise exception 'Nenhum Proprietário ativo da plataforma foi encontrado para auditar a carga Dedini.';
+  end if;
+
+  select id
+    into dedini_tenant_id
+  from public.tenants
+  where document_number = '50.109.271/0001-58';
+
+  if dedini_tenant_id is null then
+    insert into public.tenants (legal_name, trade_name, document_number, status)
+    values (
+      'Dedini S/A Indústrias de Base',
+      'Dedini — Matriz Piracicaba',
+      '50.109.271/0001-58',
+      'active'
+    )
+    returning id into dedini_tenant_id;
+  end if;
+
+  insert into public.tenant_contacts (tenant_id, full_name, email, phone, is_primary, is_active)
+  select
+    dedini_tenant_id,
+    'Robinson Santiago',
+    'robinson.santiago@dedini.com.br',
+    '(19) 3403-3222',
+    true,
+    true
+  where not exists (
+    select 1
+    from public.tenant_contacts contact
+    where contact.tenant_id = dedini_tenant_id
+      and contact.is_primary
+      and contact.is_active
+  );
+
+  insert into public.tenant_email_domains (tenant_id, domain, is_active)
+  values (dedini_tenant_id, 'dedini.com.br', true)
+  on conflict (tenant_id, domain) do nothing;
+
+  insert into public.subscription_plans (
+    name, robot_limit, annual_price_cents, included_storage_bytes, description, is_active
+  )
+  values (
+    'Demonstração Dedini — sem cobrança',
+    10,
+    0,
+    52428800,
+    'Plano exclusivo de demonstração técnica, sem cobrança e sem uso comercial.',
+    true
+  )
+  on conflict (name) do nothing;
+
+  select id
+    into demo_plan_id
+  from public.subscription_plans
+  where name = 'Demonstração Dedini — sem cobrança';
+
+  if not exists (
+    select 1
+    from public.subscriptions subscription
+    where subscription.tenant_id = dedini_tenant_id
+      and subscription.status in ('draft', 'trial', 'active')
+  ) then
+    insert into public.subscriptions (
+      tenant_id, plan_id, plan_name_snapshot, robot_limit_snapshot,
+      annual_price_cents_snapshot, included_storage_bytes_snapshot,
+      status, contract_start_date, billing_start_date, contract_end_date,
+      trial_ends_at, notes
+    )
+    select
+      dedini_tenant_id,
+      plan.id,
+      plan.name,
+      plan.robot_limit,
+      plan.annual_price_cents,
+      plan.included_storage_bytes,
+      'trial',
+      current_date,
+      current_date,
+      (current_date + interval '12 months')::date,
+      (current_date + interval '30 days')::timestamptz,
+      'Ambiente demonstrativo para avaliação técnica; sem cobrança.'
+    from public.subscription_plans plan
+    where plan.id = demo_plan_id;
+  end if;
+
+  insert into public.cost_centers (tenant_id, code, name, is_active)
+  values (
+    dedini_tenant_id,
+    'CC-ENG-4.0',
+    'Engenharia de Manutenção e Automação (Indústria 4.0)',
+    true
+  )
+  on conflict (tenant_id, code) do nothing;
+
+  select id into cost_center_id
+  from public.cost_centers
+  where tenant_id = dedini_tenant_id
+    and code = 'CC-ENG-4.0';
+
+  insert into public.units (tenant_id, cost_center_id, name, code, city, state, country, is_active)
+  values (
+    dedini_tenant_id,
+    cost_center_id,
+    'Fábrica Piloto — Caldeiraria e Usinagem Pesada',
+    'PIR-MATRIZ-01',
+    'Piracicaba',
+    'SP',
+    'Brasil',
+    true
+  )
+  on conflict (tenant_id, code) do nothing;
+
+  select id into unit_id
+  from public.units
+  where tenant_id = dedini_tenant_id
+    and code = 'PIR-MATRIZ-01';
+
+  insert into public.asset_categories (tenant_id, code, name, is_robot, is_active)
+  values
+    (dedini_tenant_id, 'HYDRAULIC_PRESS', 'Prensa hidráulica', false, true),
+    (dedini_tenant_id, 'WELDING_ROBOT', 'Robô de solda', true, true)
+  on conflict (tenant_id, code) do nothing;
+
+  select id into press_category_id
+  from public.asset_categories
+  where tenant_id = dedini_tenant_id and code = 'HYDRAULIC_PRESS';
+
+  select id into robot_category_id
+  from public.asset_categories
+  where tenant_id = dedini_tenant_id and code = 'WELDING_ROBOT';
+
+  insert into public.assets (
+    tenant_id, unit_id, cost_center_id, category_id, code, name,
+    manufacturer, model, status, criticality, notes
+  )
+  values (
+    dedini_tenant_id,
+    unit_id,
+    cost_center_id,
+    press_category_id,
+    'PRN-MTRZ-1500T',
+    'Prensa Hidráulica de Forja',
+    'Schuler',
+    'SH-1500-Heavy',
+    'stopped',
+    'high',
+    'Cenário demonstrativo: parada por condição térmica observada; leitura digitada manualmente no MARV.'
+  )
+  on conflict (tenant_id, code) do nothing;
+
+  insert into public.assets (
+    tenant_id, unit_id, cost_center_id, category_id, code, name,
+    manufacturer, model, status, criticality, notes
+  )
+  values (
+    dedini_tenant_id,
+    unit_id,
+    cost_center_id,
+    robot_category_id,
+    'RB-MTRZ-WELD-02',
+    'Braço Robótico de Solda — Flanges de Moenda',
+    'KUKA',
+    'KR 500 R2830',
+    'active',
+    'high',
+    'Cenário demonstrativo: operação estável, com leitura operacional registrada manualmente.'
+  )
+  on conflict (tenant_id, code) do nothing;
+
+  select id into press_id
+  from public.assets
+  where tenant_id = dedini_tenant_id and code = 'PRN-MTRZ-1500T' and deleted_at is null;
+
+  select id into robot_id
+  from public.assets
+  where tenant_id = dedini_tenant_id and code = 'RB-MTRZ-WELD-02' and deleted_at is null;
+
+  insert into public.asset_operational_readings (
+    tenant_id, asset_id, hour_meter_hours, current_temperature_c,
+    health_status, source, notes, created_by
+  )
+  select
+    dedini_tenant_id,
+    press_id,
+    12450.50,
+    112.40,
+    'critical',
+    'manual',
+    'Leitura demonstrativa digitada manualmente: temperatura acima da faixa operacional; avaliar circuito hidráulico e válvula proporcional.',
+    actor_id
+  where not exists (
+    select 1
+    from public.asset_operational_readings reading
+    where reading.asset_id = press_id
+      and reading.source = 'manual'
+      and reading.notes like 'Leitura demonstrativa digitada manualmente:%'
+  );
+
+  insert into public.asset_operational_readings (
+    tenant_id, asset_id, hour_meter_hours, current_temperature_c,
+    health_status, source, notes, created_by
+  )
+  select
+    dedini_tenant_id,
+    robot_id,
+    8431.20,
+    41.50,
+    'normal',
+    'manual',
+    'Leitura demonstrativa digitada manualmente: condição estável após calibração de trajetória.',
+    actor_id
+  where not exists (
+    select 1
+    from public.asset_operational_readings reading
+    where reading.asset_id = robot_id
+      and reading.source = 'manual'
+      and reading.notes like 'Leitura demonstrativa digitada manualmente: condição estável%'
+  );
+
+  insert into public.work_orders (
+    tenant_id, unit_id, cost_center_id, asset_id, title, description,
+    type, priority, status, opened_by, assigned_to, scheduled_for
+  )
+  select
+    dedini_tenant_id,
+    unit_id,
+    cost_center_id,
+    press_id,
+    'Alarme de intervenção preventiva — superaquecimento hidráulico',
+    'Cenário demonstrativo: leitura manual de 112,4 °C na prensa hidráulica. Há risco de travamento de válvula proporcional; inspecionar circuito, fluido e refrigeração antes da retomada.',
+    'corrective',
+    'high',
+    'in_progress',
+    actor_id,
+    actor_id,
+    now()
+  where not exists (
+    select 1 from public.work_orders work_order
+    where work_order.tenant_id = dedini_tenant_id
+      and work_order.title = 'Alarme de intervenção preventiva — superaquecimento hidráulico'
+  );
+
+  insert into public.work_orders (
+    tenant_id, unit_id, cost_center_id, asset_id, title, description,
+    type, priority, status, opened_by, assigned_to, opened_at, completed_at
+  )
+  select
+    dedini_tenant_id,
+    unit_id,
+    cost_center_id,
+    robot_id,
+    'Calibração periódica e correção de trajetória',
+    'Cenário demonstrativo: correção confirmada de desvio de 1,5 mm no bocal de solda; equipamento liberado para operação.',
+    'preventive',
+    'medium',
+    'completed',
+    actor_id,
+    actor_id,
+    now() - interval '2 days',
+    now() - interval '1 day'
+  where not exists (
+    select 1 from public.work_orders work_order
+    where work_order.tenant_id = dedini_tenant_id
+      and work_order.title = 'Calibração periódica e correção de trajetória'
+  );
+
+  insert into public.maintenance_plans (
+    tenant_id, asset_id, name, periodicity_days, next_due_date, assigned_to, is_active, notes
+  )
+  select
+    dedini_tenant_id,
+    press_id,
+    'Inspeção hidráulica mensal — prensa 1500T',
+    30,
+    current_date + 7,
+    actor_id,
+    true,
+    'Plano demonstrativo: inspeção de fluido, pressão e temperatura.'
+  where not exists (
+    select 1 from public.maintenance_plans plan
+    where plan.tenant_id = dedini_tenant_id
+      and plan.asset_id = press_id
+      and plan.name = 'Inspeção hidráulica mensal — prensa 1500T'
+  );
+
+  insert into public.maintenance_plans (
+    tenant_id, asset_id, name, periodicity_days, next_due_date, assigned_to, is_active, notes
+  )
+  select
+    dedini_tenant_id,
+    robot_id,
+    'Calibração trimestral de trajetória — robô de solda',
+    90,
+    current_date + 60,
+    actor_id,
+    true,
+    'Plano demonstrativo: validar bocal, repetibilidade e trajetória de solda.'
+  where not exists (
+    select 1 from public.maintenance_plans plan
+    where plan.tenant_id = dedini_tenant_id
+      and plan.asset_id = robot_id
+      and plan.name = 'Calibração trimestral de trajetória — robô de solda'
+  );
+
+  insert into public.service_requests (
+    tenant_id, unit_id, cost_center_id, asset_id, title, description,
+    category, priority, status, requested_by
+  )
+  select
+    dedini_tenant_id,
+    unit_id,
+    cost_center_id,
+    press_id,
+    'Avaliar tendência térmica da prensa hidráulica',
+    'Solicitação demonstrativa de acompanhamento técnico após leitura de temperatura elevada.',
+    'inspecao',
+    'high',
+    'triaged',
+    actor_id
+  where not exists (
+    select 1 from public.service_requests request
+    where request.tenant_id = dedini_tenant_id
+      and request.title = 'Avaliar tendência térmica da prensa hidráulica'
+  );
+
+  insert into public.audit_logs (tenant_id, actor_id, action, resource_type, resource_id, metadata)
+  select
+    dedini_tenant_id,
+    actor_id,
+    'dedini_demo_seeded',
+    'tenant_demo',
+    dedini_tenant_id::text,
+    jsonb_build_object(
+      'contact_email', 'robinson.santiago@dedini.com.br',
+      'plan', 'Demonstração Dedini — sem cobrança',
+      'assets', jsonb_build_array('PRN-MTRZ-1500T', 'RB-MTRZ-WELD-02'),
+      'operational_readings_source', 'manual'
+    )
+  where not exists (
+    select 1 from public.audit_logs audit
+    where audit.tenant_id = dedini_tenant_id
+      and audit.action = 'dedini_demo_seeded'
+  );
+end;
+$$;
+
+-- Conferência pós-carga, somente leitura.
+select
+  tenant.legal_name,
+  tenant.document_number,
+  contact.full_name as primary_contact,
+  contact.email as contact_email,
+  subscription.status as contract_status,
+  subscription.plan_name_snapshot,
+  count(distinct asset.id) as assets,
+  count(distinct work_order.id) as work_orders,
+  count(distinct plan.id) as maintenance_plans,
+  count(distinct reading.id) as operational_readings
+from public.tenants tenant
+left join public.tenant_contacts contact
+  on contact.tenant_id = tenant.id and contact.is_primary and contact.is_active
+left join public.subscriptions subscription
+  on subscription.tenant_id = tenant.id and subscription.status in ('draft', 'trial', 'active')
+left join public.assets asset
+  on asset.tenant_id = tenant.id and asset.deleted_at is null
+left join public.work_orders work_order
+  on work_order.tenant_id = tenant.id
+left join public.maintenance_plans plan
+  on plan.tenant_id = tenant.id
+left join public.asset_operational_readings reading
+  on reading.tenant_id = tenant.id
+where tenant.document_number = '50.109.271/0001-58'
+group by tenant.legal_name, tenant.document_number, contact.full_name, contact.email,
+  subscription.status, subscription.plan_name_snapshot;

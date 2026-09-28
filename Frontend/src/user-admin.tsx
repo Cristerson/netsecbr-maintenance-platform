@@ -8,6 +8,9 @@ type Props = {
   currentUserId: string;
   currentName: string;
   currentRole: string;
+  /* Presente no dossiê do Command Center: último acesso conhecido por usuário
+     (janela recente de atividade). Sem a prop, a tabela mantém o layout atual. */
+  lastAccessByUserId?: Map<string, string>;
 };
 
 type Profile = {
@@ -53,7 +56,22 @@ function formatMemberCreatedAt(createdAt: string | null | undefined) {
   return parsed.toLocaleDateString('pt-BR');
 }
 
-export function UserAdmin({ tenantId, currentUserId, currentName, currentRole }: Props) {
+/* Último acesso quando disponível; sem registro conhecido, exibe travessão. */
+function formatMemberLastAccess(lastSeenAt: string | null | undefined) {
+  if (!lastSeenAt) return '—';
+
+  const parsed = new Date(lastSeenAt);
+  if (Number.isNaN(parsed.getTime())) return '—';
+
+  return parsed.toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
+}
+
+/* Colunas extras (criação e último acesso) usadas apenas no dossiê do Command Center. */
+const memberAccessTableGrid = {
+  gridTemplateColumns: 'minmax(190px, 1.4fr) minmax(150px, 1fr) 100px 100px 135px',
+};
+
+export function UserAdmin({ tenantId, currentUserId, currentName, currentRole, lastAccessByUserId }: Props) {
   const [memberships, setMemberships] = useState<Membership[]>([]);
   const [permissions, setPermissions] = useState<Permission[]>([]);
   const [selectedMember, setSelectedMember] = useState<Membership | null>(null);
@@ -70,6 +88,7 @@ export function UserAdmin({ tenantId, currentUserId, currentName, currentRole }:
   const [manualTemporaryPassword, setManualTemporaryPassword] = useState('');
   const [issuedTemporaryPassword, setIssuedTemporaryPassword] = useState('');
   const isDetailView = selectedMember !== null;
+  const showAccessColumns = lastAccessByUserId !== undefined;
 const [isCreateFormOpen, setIsCreateFormOpen] = useState(false);
 const [isCreatingUser, setIsCreatingUser] = useState(false);
 const [newUser, setNewUser] = useState({
@@ -120,7 +139,8 @@ const [newUser, setNewUser] = useState({
     (profiles ?? []).map((profile) => [profile.id, profile.full_name]),
   );
 
-  // 3.1 Busca o mapa de e-mails dos membros deste cliente pela Edge Function.
+  // 3.1 Busca e-mails e nomes dos membros deste cliente pela Edge Function
+  // (fonte confiável: a RLS impede a leitura direta de profiles de outros membros).
   const { data: emailData, error: emailsError } = await supabase.functions.invoke(
     'create-tenant-user',
     { body: { action: 'list_tenant_user_emails', tenantId } },
@@ -140,10 +160,23 @@ const [newUser, setNewUser] = useState({
       : [],
   );
 
+  // Nomes vêm da action list_tenant_user_emails; a leitura direta de profiles
+  // (namesByUserId) fica apenas como fallback se a action falhar. Um nome já
+  // conhecido nunca é substituído por nulo/"Usuário sem nome" indevidamente.
+  const fullNamesByUserId = new Map<string, string>();
+  if (!emailsError && emailData?.fullNames && typeof emailData.fullNames === 'object') {
+    for (const [userId, value] of Object.entries(emailData.fullNames as Record<string, unknown>)) {
+      if (typeof value === 'string' && value.trim()) fullNamesByUserId.set(userId, value);
+    }
+  }
+
   setMemberships(
     (members ?? []).map((member) => ({
       ...member,
-      full_name: namesByUserId.get(member.user_id) ?? null,
+      full_name:
+        fullNamesByUserId.get(member.user_id) ??
+        namesByUserId.get(member.user_id) ??
+        null,
       email: emailsByUserId.get(member.user_id) ?? null,
     })) as Membership[],
   );
@@ -329,16 +362,39 @@ const [newUser, setNewUser] = useState({
     setMessage('');
     setErrorMessage('');
 
+    let savedFullName = nextName;
+
     if (nameChanged) {
-      const { error } = await supabase
-        .from('profiles')
-        .update({ full_name: nextName })
-        .eq('id', selectedMember.user_id);
+      // Nome vai para a Edge Function (service role): a RLS não permite que o
+      // tenant_admin escreva diretamente em profiles de outros membros, e um
+      // update sem .select() não gera erro — por isso o fluxo passa por aqui.
+      const { data: nameData, error } = await supabase.functions.invoke(
+        'create-tenant-user',
+        {
+          body: {
+            action: 'update_tenant_user_name',
+            tenantId,
+            userId: selectedMember.user_id,
+            fullName: nextName,
+          },
+        },
+      );
 
       if (error) {
-        setErrorMessage(`Não foi possível atualizar o nome: ${error.message}`);
+        let detail = error.message;
+
+        if (error instanceof FunctionsHttpError) {
+          const responseBody = await error.context.json();
+          detail = responseBody.error ?? detail;
+        }
+
+        setErrorMessage(`Não foi possível atualizar o nome: ${detail}`);
         setIsSaving(false);
         return;
+      }
+
+      if (typeof nameData?.fullName === 'string' && nameData.fullName.trim()) {
+        savedFullName = nameData.fullName;
       }
     }
 
@@ -363,13 +419,13 @@ const [newUser, setNewUser] = useState({
       current?.id === selectedMember.id
         ? {
             ...current,
-            full_name: nextName,
+            full_name: savedFullName,
             role: nextRole,
             is_active: nextActive,
           }
         : current,
     );
-    setEditFullName(nextName);
+    setEditFullName(savedFullName);
     setEditRole(nextRole);
     setEditActive(nextActive);
     await loadData();
@@ -543,10 +599,15 @@ autoComplete="new-password"
   </form>
 )}
       {!isDetailView && <div className="panel table client-user-table">
-        <div className="table-head client-user-table-head">
+        <div
+          className="table-head client-user-table-head"
+          style={showAccessColumns ? memberAccessTableGrid : undefined}
+        >
           <span>USUÁRIO</span>
           <span>PERFIL</span>
           <span>STATUS</span>
+          {showAccessColumns && <span>CRIADO EM</span>}
+          {showAccessColumns && <span>ÚLTIMO ACESSO</span>}
         </div>
         <p className="authenticated-user">
   Sessão atual: <strong>{currentName}</strong> — {formatRole(currentRole)}
@@ -567,6 +628,7 @@ autoComplete="new-password"
             <div
   className={`table-row ${member.is_active ? '' : 'is-inactive'}`}
   key={member.id}
+  style={showAccessColumns ? memberAccessTableGrid : undefined}
 >
   
               <div>
@@ -583,6 +645,10 @@ autoComplete="new-password"
               <span className={`badge ${member.is_active ? 'asset-status-active' : 'asset-status-inactive'}`}>
                 {member.is_active ? 'Ativo' : 'Inativo'}
               </span>
+              {showAccessColumns && <span>{formatMemberCreatedAt(member.created_at)}</span>}
+              {showAccessColumns && (
+                <span>{formatMemberLastAccess(lastAccessByUserId?.get(member.user_id))}</span>
+              )}
             </div>
           ))}
       </div>}

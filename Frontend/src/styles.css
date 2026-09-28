@@ -405,6 +405,17 @@
   resize: vertical;
 }
 
+.support-ticket-description textarea {
+  width: 100%;
+  min-height: 120px;
+  border: 1px solid #d8e3f0;
+  border-radius: 7px;
+  padding: 10px;
+  font: 13px inherit;
+  background: #fff;
+  resize: vertical;
+}
+
 .downtime-toggle span {
   display: flex;
   align-items: center;
@@ -831,6 +842,23 @@ nav button { min-height: 42px; border-radius: 8px; font-size: 13px; }
 nav button.active { background: linear-gradient(90deg, #087cc4, #075d9d); box-shadow: inset 3px 0 #65c8ea; }
 .sidebar-bottom { padding-top: 14px; border-top: 1px solid rgb(141 183 232 / 16%); }
 .user { border-top: 0; margin: 8px 5px 0; padding-top: 12px; }
+
+/* Mantém as ações de sessão acessíveis mesmo em telas baixas: apenas o menu central rola. */
+.sidebar {
+  overflow: hidden;
+}
+
+.sidebar > nav {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  align-content: start;
+}
+
+.sidebar-bottom {
+  margin-top: 12px;
+  flex: 0 0 auto;
+}
 main { margin-left: 264px; width: calc(100% - 264px); }
 header { height: 104px; padding: 24px 42px; box-shadow: 0 1px 0 #dfe8f3; }
 header h1 { font-size: 25px; }

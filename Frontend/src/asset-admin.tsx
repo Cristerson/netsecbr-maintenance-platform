@@ -53,6 +53,18 @@ type CostCenter = {
   is_active: boolean;
 };
 
+type OperationalReadingStatus = 'normal' | 'attention' | 'critical' | 'unavailable';
+
+type AssetOperationalReading = {
+  id: string;
+  hour_meter_hours: number | null;
+  current_temperature_c: number | null;
+  health_status: OperationalReadingStatus;
+  source: 'manual' | 'ocr' | 'iot';
+  captured_at: string;
+  notes: string | null;
+};
+
 const statusLabels: Record<AssetStatus, string> = {
   active: 'Ativo',
   inactive: 'Inativo',
@@ -83,6 +95,26 @@ const emptyForm = {
   notes: '',
 };
 
+const emptyReadingForm = {
+  hourMeterHours: '',
+  currentTemperatureC: '',
+  healthStatus: 'normal' as OperationalReadingStatus,
+  notes: '',
+};
+
+const operationalReadingStatusLabels: Record<OperationalReadingStatus, string> = {
+  normal: 'Normal',
+  attention: 'Atenção',
+  critical: 'Crítico',
+  unavailable: 'Sem leitura disponível',
+};
+
+const operationalReadingSourceLabels = {
+  manual: 'Digitada manualmente',
+  ocr: 'OCR',
+  iot: 'IoT',
+} as const;
+
 export function AssetAdmin({ tenantId, canManage }: Props) {
   const [assets, setAssets] = useState<Asset[]>([]);
   const [categories, setCategories] = useState<AssetCategory[]>([]);
@@ -95,6 +127,10 @@ export function AssetAdmin({ tenantId, canManage }: Props) {
   const [isCategoryAdminOpen, setIsCategoryAdminOpen] = useState(false);
   const [editingAsset, setEditingAsset] = useState<Asset | null>(null);
   const [form, setForm] = useState(emptyForm);
+  const [operationalReadings, setOperationalReadings] = useState<AssetOperationalReading[]>([]);
+  const [readingForm, setReadingForm] = useState(emptyReadingForm);
+  const [isReadingSaving, setIsReadingSaving] = useState(false);
+  const [readingError, setReadingError] = useState('');
   const [message, setMessage] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
   const isDetailView = isFormOpen && editingAsset !== null;
@@ -212,6 +248,9 @@ export function AssetAdmin({ tenantId, canManage }: Props) {
     setMessage('');
     setErrorMessage('');
     setEditingAsset(null);
+    setOperationalReadings([]);
+    setReadingForm(emptyReadingForm);
+    setReadingError('');
     setForm({
       ...emptyForm,
       category_id: availableCategories[0]?.id ?? '',
@@ -225,6 +264,9 @@ export function AssetAdmin({ tenantId, canManage }: Props) {
     setMessage('');
     setErrorMessage('');
     setEditingAsset(asset);
+    setOperationalReadings([]);
+    setReadingForm(emptyReadingForm);
+    setReadingError('');
     setForm({
       code: asset.code,
       name: asset.name,
@@ -239,7 +281,75 @@ export function AssetAdmin({ tenantId, canManage }: Props) {
       installed_at: asset.installed_at ?? '',
       notes: asset.notes ?? '',
     });
+    void loadOperationalReadings(asset.id);
     setIsFormOpen(true);
+  }
+
+  async function loadOperationalReadings(assetId: string) {
+    const { data, error } = await supabase
+      .from('asset_operational_readings')
+      .select('id, hour_meter_hours, current_temperature_c, health_status, source, captured_at, notes')
+      .eq('tenant_id', tenantId)
+      .eq('asset_id', assetId)
+      .order('captured_at', { ascending: false })
+      .limit(8);
+
+    if (error) {
+      setReadingError(`Não foi possível carregar as leituras operacionais: ${error.message}`);
+      return;
+    }
+
+    setOperationalReadings((data ?? []) as AssetOperationalReading[]);
+  }
+
+  async function saveOperationalReading() {
+    if (!editingAsset || isReadingSaving) return;
+
+    const hourMeterHours = readingForm.hourMeterHours.trim() === ''
+      ? null
+      : Number(readingForm.hourMeterHours);
+    const currentTemperatureC = readingForm.currentTemperatureC.trim() === ''
+      ? null
+      : Number(readingForm.currentTemperatureC);
+
+    if (hourMeterHours === null && currentTemperatureC === null && !readingForm.notes.trim()) {
+      setReadingError('Informe o horímetro, a temperatura ou uma observação da leitura.');
+      return;
+    }
+    if (hourMeterHours !== null && (!Number.isFinite(hourMeterHours) || hourMeterHours < 0)) {
+      setReadingError('Informe um horímetro igual ou maior que zero.');
+      return;
+    }
+    if (
+      currentTemperatureC !== null
+      && (!Number.isFinite(currentTemperatureC) || currentTemperatureC < -100 || currentTemperatureC > 1000)
+    ) {
+      setReadingError('Informe uma temperatura entre -100 °C e 1.000 °C.');
+      return;
+    }
+
+    setIsReadingSaving(true);
+    setReadingError('');
+
+    const { error } = await supabase.from('asset_operational_readings').insert({
+      tenant_id: tenantId,
+      asset_id: editingAsset.id,
+      hour_meter_hours: hourMeterHours,
+      current_temperature_c: currentTemperatureC,
+      health_status: readingForm.healthStatus,
+      source: 'manual',
+      notes: readingForm.notes.trim() || null,
+    });
+
+    if (error) {
+      setReadingError(`Não foi possível registrar a leitura: ${error.message}`);
+    } else {
+      setReadingForm(emptyReadingForm);
+      setMessage('Leitura operacional registrada com sucesso.');
+      await loadOperationalReadings(editingAsset.id);
+    }
+
+    setIsReadingSaving(false);
   }
 
   function handleUnitChange(unitId: string) {
@@ -630,6 +740,117 @@ export function AssetAdmin({ tenantId, canManage }: Props) {
               />
             </label>
           </div>
+
+          {editingAsset && (
+            <section
+              aria-label="Leituras operacionais"
+              style={{ marginTop: 24, paddingTop: 20, borderTop: '1px solid #d8e3f0' }}
+            >
+              <p className="eyebrow">LEITURAS OPERACIONAIS</p>
+              <h3 style={{ margin: '4px 0 8px' }}>Medição manual do ativo</h3>
+              <p className="empty" style={{ margin: '0 0 16px' }}>
+                Registre horímetro, temperatura e condição observada. A estrutura também comporta
+                futuras leituras por OCR ou IoT, sem afirmar que essas integrações já estão ativas.
+              </p>
+
+              <div className="asset-form-grid">
+                <label className="field">
+                  <span>Horímetro (horas)</span>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={readingForm.hourMeterHours}
+                    placeholder="Ex.: 12450,50"
+                    disabled={isReadingSaving}
+                    onChange={(event) => setReadingForm({ ...readingForm, hourMeterHours: event.target.value })}
+                  />
+                </label>
+
+                <label className="field">
+                  <span>Temperatura atual (°C)</span>
+                  <input
+                    type="number"
+                    min="-100"
+                    max="1000"
+                    step="0.1"
+                    value={readingForm.currentTemperatureC}
+                    placeholder="Ex.: 41,5"
+                    disabled={isReadingSaving}
+                    onChange={(event) => setReadingForm({ ...readingForm, currentTemperatureC: event.target.value })}
+                  />
+                </label>
+
+                <label className="field">
+                  <span>Condição observada</span>
+                  <select
+                    value={readingForm.healthStatus}
+                    disabled={isReadingSaving}
+                    onChange={(event) => setReadingForm({
+                      ...readingForm,
+                      healthStatus: event.target.value as OperationalReadingStatus,
+                    })}
+                  >
+                    {(Object.keys(operationalReadingStatusLabels) as OperationalReadingStatus[]).map((status) => (
+                      <option key={status} value={status}>
+                        {operationalReadingStatusLabels[status]}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <label className="field asset-form-notes">
+                  <span>Observação da leitura</span>
+                  <textarea
+                    rows={3}
+                    value={readingForm.notes}
+                    placeholder="Ex.: leitura verificada no painel local; avaliar circuito hidráulico."
+                    disabled={isReadingSaving}
+                    onChange={(event) => setReadingForm({ ...readingForm, notes: event.target.value })}
+                  />
+                </label>
+              </div>
+
+              {readingError && <p className="error-message">{readingError}</p>}
+
+              <div className="form-actions" style={{ marginTop: 12 }}>
+                <button
+                  type="button"
+                  className="secondary button-with-icon"
+                  disabled={isReadingSaving}
+                  onClick={() => void saveOperationalReading()}
+                >
+                  {isReadingSaving ? 'Registrando leitura...' : 'Registrar leitura'}
+                </button>
+              </div>
+
+              <div style={{ marginTop: 18 }}>
+                <h3 style={{ margin: '0 0 8px' }}>Últimas leituras</h3>
+                {operationalReadings.length === 0 ? (
+                  <p className="empty">Nenhuma leitura operacional registrada para este ativo.</p>
+                ) : (
+                  <div className="data-list">
+                    {operationalReadings.map((reading) => (
+                      <div className="data-row" key={reading.id}>
+                        <div>
+                          <strong>
+                            {reading.hour_meter_hours !== null ? `${reading.hour_meter_hours.toLocaleString('pt-BR')} h` : 'Horímetro não informado'}
+                            {' · '}
+                            {reading.current_temperature_c !== null ? `${reading.current_temperature_c.toLocaleString('pt-BR')} °C` : 'Temperatura não informada'}
+                          </strong>
+                          <small>
+                            {new Date(reading.captured_at).toLocaleString('pt-BR')} · {operationalReadingSourceLabels[reading.source]}
+                            {reading.notes ? ` · ${reading.notes}` : ''}
+                          </small>
+                        </div>
+                        <span className="badge">{operationalReadingStatusLabels[reading.health_status]}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </section>
+          )}
 
           <div className="form-actions">
             {editingAsset && (

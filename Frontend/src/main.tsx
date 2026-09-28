@@ -36,6 +36,7 @@ import { BrandingAdmin } from './branding-admin';
 import { FinanceAdmin } from './finance-admin';
 import { PurchaseManagement } from './purchase-management';
 import { PreventivePlanAdmin } from './preventive-plan-admin';
+import { SupportTicketAdmin } from './support-ticket-admin';
 import { HelpCenterPage } from './help-center';
 import { CommandCenter } from './command-center';
 import './styles.css';
@@ -347,6 +348,7 @@ function App({ account }: { account: CurrentAccount }) {
               'Painel Financeiro',
               'Cadastros',
               'Integrações e importações',
+              ...(account.isTenantAdmin ? ['Suporte NETSECBR'] : []),
             ]}
           />
         )}
@@ -614,6 +616,7 @@ function AdminPanel({
     'Planos e contratos': 'COMERCIAL',
     'Financeiro NETSECBR': 'FINANCEIRO',
     'Suporte e auditoria': 'GOVERNANÇA',
+    'Suporte NETSECBR': 'SUPORTE',
   };
 
   useEffect(() => {
@@ -671,6 +674,8 @@ function AdminPanel({
     tenantId={account.tenantId}
     onBackToSettings={() => setSelected(null)}
   />
+) : selected === 'Suporte NETSECBR' && account ? (
+  <SupportTicketAdmin tenantId={account.tenantId} account={account} />
 ) : selected === 'Integrações e importações' ? (
             <div className="insight">
               <span>

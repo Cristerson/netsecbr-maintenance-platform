@@ -13,6 +13,7 @@ export type CurrentAccount = {
   permissions: string[];
   isTenantAdmin: boolean;
   isNetsecbrAdmin: boolean;
+  hasTenantMembership: boolean;
 };
 
 
@@ -125,12 +126,87 @@ const permissions = (grantedPermissions ?? []).map(
         roleLabel,
         tenantName: membershipTenant?.trade_name || 'NETSECBR Control Center',
         permissions, isTenantAdmin: membership?.role === 'tenant_admin', isNetsecbrAdmin: profile.platform_role === 'netsecbr_admin',
+        hasTenantMembership: Boolean(memberships?.[0]),
       });
       setIsChecking(false);
     };
 
     void loadAccount();
   }, [session]);
+
+  useEffect(() => {
+    if (!account?.hasTenantMembership || !account.tenantId) return;
+
+    const storageKey = `marv-access-activity:${account.userId}:${account.tenantId}`;
+    let activityId = '';
+
+    // O JWT contém o identificador UUID da sessão. Usamos somente esse claim
+    // para agrupar a atividade, sem persistir ou enviar o token em si.
+    try {
+      const payload = session?.access_token.split('.')[1];
+      const sessionId = payload
+        ? JSON.parse(atob(payload.replace(/-/g, '+').replace(/_/g, '/'))).session_id
+        : null;
+      if (typeof sessionId === 'string' && /^[0-9a-f-]{36}$/i.test(sessionId)) {
+        activityId = sessionId;
+      }
+    } catch {
+      activityId = '';
+    }
+
+    if (!activityId) {
+      try {
+        activityId = window.sessionStorage.getItem(storageKey) ?? '';
+        if (!activityId) {
+          activityId = crypto.randomUUID();
+          window.sessionStorage.setItem(storageKey, activityId);
+        }
+      } catch {
+        activityId = crypto.randomUUID();
+      }
+    }
+
+    const browserName = navigator.userAgent.includes('Edg/')
+      ? 'Microsoft Edge'
+      : navigator.userAgent.includes('Firefox/')
+        ? 'Firefox'
+        : navigator.userAgent.includes('Chrome/')
+          ? 'Google Chrome'
+          : navigator.userAgent.includes('Safari/')
+            ? 'Safari'
+            : 'Navegador não identificado';
+    const operatingSystem = navigator.userAgent.includes('Windows')
+      ? 'Windows'
+      : navigator.userAgent.includes('Android')
+        ? 'Android'
+        : navigator.userAgent.includes('iPhone') || navigator.userAgent.includes('iPad')
+          ? 'iOS'
+          : navigator.userAgent.includes('Mac OS')
+            ? 'macOS'
+            : 'Sistema não identificado';
+    const deviceLabel = `${browserName} · ${operatingSystem}`;
+
+    const reportActivity = () => {
+      void supabase.rpc('record_tenant_access_activity', {
+        target_tenant_id: account.tenantId,
+        target_session_id: activityId,
+        target_device_label: deviceLabel,
+        target_access_origin: window.location.origin,
+      });
+    };
+
+    reportActivity();
+    const intervalId = window.setInterval(reportActivity, 120_000);
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible') reportActivity();
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
+
+    return () => {
+      window.clearInterval(intervalId);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+    };
+  }, [account, session?.access_token]);
 
   async function signIn(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
