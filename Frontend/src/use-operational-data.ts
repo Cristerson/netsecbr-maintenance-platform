@@ -28,6 +28,14 @@ export type UpcomingPreventivePlan = {
   assetLabel: string;
 };
 
+export type PendingServiceRequest = {
+  id: string;
+  requestNumber: number;
+  title: string;
+  priority: 'Crítica' | 'Alta' | 'Média';
+  requestedAt: string;
+};
+
 const assetStatus = { active: 'Operando', inactive: 'Parado', maintenance: 'Em manutenção', stopped: 'Parado', retired: 'Parado' } as const;
 const criticality = { critical: 'Crítica', high: 'Alta', medium: 'Média', low: 'Média' } as const;
 const orderStatus = { open: 'Aberta', in_progress: 'Em execução', waiting_material: 'Aguardando material', completed: 'Concluída', cancelled: 'Cancelada' } as const;
@@ -38,6 +46,7 @@ export function useOperationalData(tenantId: string) {
   const [orders, setOrders] = useState<OperationalWorkOrder[]>([]);
   const [overduePreventivePlans, setOverduePreventivePlans] = useState(0);
   const [upcomingPreventivePlans, setUpcomingPreventivePlans] = useState<UpcomingPreventivePlan[]>([]);
+  const [pendingServiceRequests, setPendingServiceRequests] = useState<PendingServiceRequest[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -67,6 +76,7 @@ export function useOperationalData(tenantId: string) {
     setOrders([]);
     setOverduePreventivePlans(0);
     setUpcomingPreventivePlans([]);
+    setPendingServiceRequests([]);
     setError('');
     setIsLoading(true);
   }, [tenantId]);
@@ -85,7 +95,13 @@ export function useOperationalData(tenantId: string) {
       setIsLoading(true);
     }
 
-    const [{ data: assetsData, error: assetsError }, { data: ordersData, error: ordersError }, { data: plansData, error: plansError }, { data: upcomingPlansData, error: upcomingPlansError }] = await Promise.all([
+    const [
+      { data: assetsData, error: assetsError },
+      { data: ordersData, error: ordersError },
+      { data: plansData, error: plansError },
+      { data: upcomingPlansData, error: upcomingPlansError },
+      { data: pendingRequestsData, error: pendingRequestsError },
+    ] = await Promise.all([
       supabase.from('assets').select('id, name, code, status, criticality, units(name, city)').eq('tenant_id', tenantId).order('name'),
       supabase.from('work_orders').select('id, order_number, title, type, priority, status, assets(name), assigned_profile:profiles!work_orders_assigned_to_fkey(full_name)').eq('tenant_id', tenantId).order('opened_at', { ascending: false }).limit(50),
       supabase.from('maintenance_plans').select('id, is_active, next_due_date').eq('tenant_id', tenantId),
@@ -96,12 +112,19 @@ export function useOperationalData(tenantId: string) {
         .eq('is_active', true)
         .order('next_due_date', { ascending: true })
         .limit(3),
+      supabase
+        .from('service_requests')
+        .select('id, request_number, title, priority, requested_at')
+        .eq('tenant_id', tenantId)
+        .eq('status', 'triaged')
+        .order('requested_at', { ascending: false })
+        .limit(200),
     ]);
 
     // Resposta de uma carga já substituída por outra mais recente: descarta em silêncio.
     if (!isLatestRequest()) return;
 
-    if (assetsError || ordersError || plansError || upcomingPlansError) {
+    if (assetsError || ordersError || plansError || upcomingPlansError || pendingRequestsError) {
       setError('Não foi possível carregar os dados operacionais agora. Atualize a página e tente novamente.');
       hasInitialLoadCompleted.current = true;
       setIsLoading(false);
@@ -121,6 +144,14 @@ export function useOperationalData(tenantId: string) {
       name: plan.name,
       nextDueDate: plan.next_due_date,
       assetLabel: plan.assets ? `${plan.assets.code} · ${plan.assets.name}` : 'Ativo não vinculado',
+    })));
+
+    setPendingServiceRequests((pendingRequestsData ?? []).map((request: any) => ({
+      id: request.id,
+      requestNumber: request.request_number,
+      title: request.title,
+      priority: criticality[request.priority as keyof typeof criticality] ?? 'Média',
+      requestedAt: request.requested_at,
     })));
 
     setAssets((assetsData ?? []).map((asset: any) => ({
@@ -146,5 +177,14 @@ export function useOperationalData(tenantId: string) {
     setIsLoading(false);
   }, [tenantId]);
 
-  return { assets, orders, overduePreventivePlans, upcomingPreventivePlans, isLoading, error, reload: load };
+  return {
+    assets,
+    orders,
+    overduePreventivePlans,
+    upcomingPreventivePlans,
+    pendingServiceRequests,
+    isLoading,
+    error,
+    reload: load,
+  };
 }

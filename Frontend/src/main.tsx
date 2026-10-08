@@ -22,6 +22,7 @@ import { AuthGate, type CurrentAccount } from './auth-gate';
 import {
   type OperationalAsset as Asset,
   type OperationalWorkOrder as WorkOrder,
+  type PendingServiceRequest,
   type UpcomingPreventivePlan,
   useOperationalData,
 } from './use-operational-data';
@@ -64,7 +65,16 @@ function App({ account }: { account: CurrentAccount }) {
     | 'netsecbr_admin'
   >('dashboard');
   const [menuOpen, setMenuOpen] = useState(false);
-  const { assets, orders, overduePreventivePlans, upcomingPreventivePlans, isLoading, error, reload: reloadOperationalData } = useOperationalData(account.tenantId);
+  const {
+    assets,
+    orders,
+    overduePreventivePlans,
+    upcomingPreventivePlans,
+    pendingServiceRequests,
+    isLoading,
+    error,
+    reload: reloadOperationalData,
+  } = useOperationalData(account.tenantId);
   const [search, setSearch] = useState('');
   const [clientAdminNavigationSignal, setClientAdminNavigationSignal] = useState(0);
 
@@ -137,6 +147,8 @@ function App({ account }: { account: CurrentAccount }) {
   // Atalhos do Dashboard seguem exatamente as mesmas condições do menu:
   // nenhum botão abre um módulo que estaria oculto na navegação.
   const canOpenOrders = canAccess('work_orders.read') || canAccess('work_orders.create');
+  const canOpenRequests = canAccess('service_requests.create');
+  const canApproveRequests = account.isTenantAdmin || account.isNetsecbrAdmin;
   const canOpenPreventivePlans =
     canAccess('assets.read') ||
     canAccess('assets.manage') ||
@@ -275,13 +287,19 @@ function App({ account }: { account: CurrentAccount }) {
             orders={orders}
             overduePreventivePlans={overduePreventivePlans}
             upcomingPreventivePlans={upcomingPreventivePlans}
+            pendingServiceRequests={pendingServiceRequests}
             canOpenOrders={canOpenOrders}
             canOpenPreventivePlans={canOpenPreventivePlans}
+            canOpenRequests={canOpenRequests}
+            canApproveRequests={canApproveRequests}
             onOpenOrders={() => {
               if (canOpenOrders) setPage('orders');
             }}
             onOpenPreventivePlans={() => {
               if (canOpenPreventivePlans) setPage('preventive_plans');
+            }}
+            onOpenRequests={() => {
+              if (canOpenRequests) setPage('requests');
             }}
           />
         )}
@@ -303,6 +321,7 @@ function App({ account }: { account: CurrentAccount }) {
               account.isTenantAdmin ||
               account.permissions.includes('service_requests.create')
             }
+            onOpenOrders={() => setPage('orders')}
           />
         )}
 
@@ -401,19 +420,27 @@ function Dashboard({
   orders,
   overduePreventivePlans,
   upcomingPreventivePlans,
+  pendingServiceRequests,
   canOpenOrders,
   canOpenPreventivePlans,
+  canOpenRequests,
+  canApproveRequests,
   onOpenOrders,
   onOpenPreventivePlans,
+  onOpenRequests,
 }: {
   assets: Asset[];
   orders: WorkOrder[];
   overduePreventivePlans: number;
   upcomingPreventivePlans: UpcomingPreventivePlan[];
+  pendingServiceRequests: PendingServiceRequest[];
   canOpenOrders: boolean;
   canOpenPreventivePlans: boolean;
+  canOpenRequests: boolean;
+  canApproveRequests: boolean;
   onOpenOrders: () => void;
   onOpenPreventivePlans: () => void;
+  onOpenRequests: () => void;
 }) {
   const critical = orders.filter((order) => order.priority === 'Crítica').length;
 
@@ -449,6 +476,22 @@ function Dashboard({
           icon={<AlertTriangle />}
           warn={overduePreventivePlans > 0}
         />
+
+        {canApproveRequests && (
+          <Metric
+            label="Aprovações pendentes"
+            value={String(pendingServiceRequests.length)}
+            trend={
+              pendingServiceRequests.length === 0
+                ? 'Nenhuma solicitação aguardando aprovação'
+                : pendingServiceRequests.length === 1
+                  ? '1 solicitação pronta para gerar OS'
+                  : `${pendingServiceRequests.length} solicitações prontas para gerar OS`
+            }
+            icon={<ClipboardList />}
+            warn={pendingServiceRequests.length > 0}
+          />
+        )}
 
         <Metric
           label="Ativos em parada"
@@ -550,6 +593,43 @@ function Dashboard({
             );
           })}
         </article>
+
+        {canApproveRequests && <article className="panel orders-panel">
+          <div className="panel-head">
+            <div>
+              <p className="eyebrow">APROVAÇÕES</p>
+              <h2>Solicitações pendentes</h2>
+            </div>
+
+            {canOpenRequests && (
+              <button onClick={onOpenRequests}>
+                Ver solicitações <ArrowRight size={16} />
+              </button>
+            )}
+          </div>
+
+          {pendingServiceRequests.length === 0 && (
+            <p className="empty">Nenhuma solicitação aguardando aprovação.</p>
+          )}
+
+          {pendingServiceRequests.slice(0, 3).map((request) => (
+            <div className="order-row" key={request.id}>
+              <div className="order-icon">
+                <ClipboardList size={18} />
+              </div>
+
+              <div>
+                <strong>Solicitação #{request.requestNumber} · {request.title}</strong>
+                <p>Aguardando aprovação para criação da OS</p>
+              </div>
+
+              <div>
+                <Badge>{request.priority}</Badge>
+                <small>{formatDashboardDate(request.requestedAt)}</small>
+              </div>
+            </div>
+          ))}
+        </article>}
       </div>
 
       <article className="panel asset-health">

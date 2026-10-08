@@ -12,6 +12,7 @@ type Props = {
   currentUserId: string;
   isTenantAdmin: boolean;
   canCreate: boolean;
+  onOpenOrders: () => void;
 };
 
 type ServiceRequestStatus = 'open' | 'triaged' | 'converted_to_wo' | 'cancelled';
@@ -112,6 +113,7 @@ export function ServiceRequestAdmin({
   currentUserId,
   isTenantAdmin,
   canCreate,
+  onOpenOrders,
 }: Props) {
   const [requests, setRequests] = useState<ServiceRequestRow[]>([]);
   const [assets, setAssets] = useState<Asset[]>([]);
@@ -121,7 +123,7 @@ export function ServiceRequestAdmin({
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [isFormOpen, setIsFormOpen] = useState(false);
-  const [editingRequest, setEditingRequest] = useState<ServiceRequest | null>(null);
+  const [editingRequest, setEditingRequest] = useState<ServiceRequestRow | null>(null);
   const [form, setForm] = useState(emptyForm);
   const [message, setMessage] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
@@ -258,7 +260,7 @@ export function ServiceRequestAdmin({
     setIsFormOpen(true);
   }
 
-  function openEditRequest(request: ServiceRequest) {
+  function openEditRequest(request: ServiceRequestRow) {
     setMessage('');
     setErrorMessage('');
     setEditingRequest(request);
@@ -363,22 +365,55 @@ export function ServiceRequestAdmin({
       if (error) {
         setErrorMessage(`Não foi possível atualizar a solicitação: ${error.message}`);
       } else {
-        setMessage('Solicitação atualizada com sucesso.');
-        setIsFormOpen(false);
+        const updatedRequest: ServiceRequestRow = {
+          ...editingRequest,
+          ...payload,
+          status: payload.status ?? editingRequest.status,
+          estimated_total_cost_cents: Math.round(estimatedTotal * 100),
+        };
+
+        setEditingRequest(updatedRequest);
+        setMessage(
+          updatedRequest.status === 'triaged'
+            ? 'Triagem salva. A solicitação está pronta para aprovação e criação da OS.'
+            : 'Solicitação atualizada com sucesso.',
+        );
         await loadData();
       }
     } else {
-      const { error } = await supabase.from('service_requests').insert({
-        ...payload,
-        tenant_id: tenantId,
-        requested_by: currentUserId,
-      });
+      const { data: createdRequest, error } = await supabase
+        .from('service_requests')
+        .insert({
+          ...payload,
+          tenant_id: tenantId,
+          requested_by: currentUserId,
+        })
+        .select(
+          'id, request_number, tenant_id, unit_id, cost_center_id, asset_id, title, description, category, priority, status, requested_by, requested_at, converted_to_work_order_id, triage_notes, estimated_service_cost_cents, estimated_material_cost_cents, estimated_total_cost_cents, triaged_at, triaged_by, approved_at, approved_by',
+        )
+        .single();
 
       if (error) {
         setErrorMessage(`Não foi possível abrir a solicitação: ${error.message}`);
+      } else if (!createdRequest) {
+        setErrorMessage('A solicitação foi criada, mas não foi possível abrir o detalhe. Atualize a lista.');
       } else {
-        setMessage('Solicitação aberta com sucesso.');
-        setIsFormOpen(false);
+        const createdRow: ServiceRequestRow = {
+          ...(createdRequest as ServiceRequest),
+          asset_name: assets.find((asset) => asset.id === createdRequest.asset_id)?.name ?? null,
+          unit_name: units.find((unit) => unit.id === createdRequest.unit_id)?.name ?? '—',
+          cost_center_name:
+            costCenters.find((costCenter) => costCenter.id === createdRequest.cost_center_id)?.name ?? '—',
+          requested_by_name: null,
+          converted_wo_number: null,
+        };
+
+        setEditingRequest(createdRow);
+        setMessage(
+          isTenantAdmin
+            ? 'Solicitação aberta. Registre a triagem do supervisor para liberar a aprovação e a criação da OS.'
+            : 'Solicitação aberta com sucesso.',
+        );
         await loadData();
       }
     }
@@ -434,7 +469,7 @@ export function ServiceRequestAdmin({
     setIsSaving(false);
   }
 
-  async function convertToWorkOrder(request: ServiceRequest) {
+  async function convertToWorkOrder(request: ServiceRequestRow) {
     if (!isTenantAdmin) return;
 
     if (
@@ -466,19 +501,16 @@ export function ServiceRequestAdmin({
       return;
     }
 
-    const { error: updateError } = await supabase
-      .from('service_requests')
-      .update({
-        status: 'converted_to_wo',
-        converted_to_work_order_id: newOrder.id,
-      })
-      .eq('id', request.id);
-
-    if (updateError) {
-      setErrorMessage(`A OS #${newOrder.order_number} foi criada, mas não foi possível atualizar a solicitação: ${updateError.message}`);
-    } else {
-      setMessage(`Solicitação #${request.request_number} convertida na OS #${newOrder.order_number}.`);
-    }
+    setEditingRequest({
+      ...request,
+      status: 'converted_to_wo',
+      converted_to_work_order_id: newOrder.id,
+      converted_wo_number: newOrder.order_number,
+      approved_at: new Date().toISOString(),
+      approved_by: currentUserId,
+    });
+    setForm((current) => ({ ...current, status: 'converted_to_wo' }));
+    setMessage(`Solicitação #${request.request_number} aprovada e convertida na OS #${newOrder.order_number}.`);
 
     setIsSaving(false);
     await loadData();
@@ -584,6 +616,21 @@ export function ServiceRequestAdmin({
                 <strong>Solicitada em:</strong>{' '}
                 {new Date(editingRequest.requested_at).toLocaleDateString('pt-BR')}
               </p>
+              {editingRequest.status === 'open' && (
+                <p>
+                  <strong>Etapa atual:</strong> 1 de 3 · Registre a triagem e salve para encaminhar para aprovação.
+                </p>
+              )}
+              {editingRequest.status === 'triaged' && (
+                <p>
+                  <strong>Etapa atual:</strong> 2 de 3 · Solicitação em triagem e pronta para aprovação e criação da OS.
+                </p>
+              )}
+              {editingRequest.status === 'converted_to_wo' && (
+                <p>
+                  <strong>Etapa atual:</strong> 3 de 3 · OS #{editingRequest.converted_wo_number ?? 'gerada'} vinculada a esta solicitação.
+                </p>
+              )}
             </div>
           )}
 
@@ -791,12 +838,22 @@ export function ServiceRequestAdmin({
             {editingRequest && isTenantAdmin && editingRequest.status === 'triaged' && (
               <button
                 type="button"
-                className="secondary button-with-icon"
+                className="button-with-icon"
                 disabled={isSaving}
                 onClick={() => void convertToWorkOrder(editingRequest)}
               >
                 <ArrowRight size={17} />
                 Aprovar e criar OS
+              </button>
+            )}
+            {editingRequest?.status === 'converted_to_wo' && editingRequest.converted_wo_number && (
+              <button
+                type="button"
+                className="button-with-icon"
+                onClick={onOpenOrders}
+              >
+                <ArrowRight size={17} />
+                Ver OS #{editingRequest.converted_wo_number}
               </button>
             )}
             <button type="submit" disabled={isSaving || isReadOnlyDetail} className="button-with-icon" hidden={isReadOnlyDetail}>
@@ -877,9 +934,35 @@ export function ServiceRequestAdmin({
                 </span>
 
                 {request.converted_wo_number && (
-                  <small className="request-converted">
-                    OS #{request.converted_wo_number}
-                  </small>
+                  <button
+                    type="button"
+                    className="work-order-link request-converted"
+                    onClick={onOpenOrders}
+                  >
+                    Ver OS #{request.converted_wo_number}
+                  </button>
+                )}
+
+                {isTenantAdmin && request.status === 'open' && (
+                  <button
+                    type="button"
+                    className="secondary request-converted"
+                    onClick={() => openEditRequest(request)}
+                  >
+                    Fazer triagem
+                  </button>
+                )}
+
+                {isTenantAdmin && request.status === 'triaged' && (
+                  <button
+                    type="button"
+                    className="button-with-icon request-converted"
+                    disabled={isSaving}
+                    onClick={() => void convertToWorkOrder(request)}
+                  >
+                    <ArrowRight size={15} />
+                    Aprovar e criar OS
+                  </button>
                 )}
               </span>
 
