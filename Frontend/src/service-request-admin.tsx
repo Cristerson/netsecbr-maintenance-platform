@@ -17,6 +17,7 @@ type Props = {
 
 type ServiceRequestStatus = 'open' | 'triaged' | 'converted_to_wo' | 'cancelled';
 type ServiceRequestPriority = 'low' | 'medium' | 'high' | 'critical';
+type ServiceRequestMaintenanceType = 'corrective' | 'preventive' | null;
 
 type ServiceRequest = {
   id: string;
@@ -28,6 +29,7 @@ type ServiceRequest = {
   title: string;
   description: string | null;
   category: string;
+  maintenance_type: ServiceRequestMaintenanceType;
   priority: ServiceRequestPriority;
   status: ServiceRequestStatus;
   requested_by: string;
@@ -98,6 +100,7 @@ const emptyForm = {
   title: '',
   description: '',
   category: 'geral',
+  maintenance_type: null as ServiceRequestMaintenanceType,
   priority: 'medium' as ServiceRequestPriority,
   unit_id: '',
   cost_center_id: '',
@@ -122,6 +125,10 @@ export function ServiceRequestAdmin({
   const [statusFilter, setStatusFilter] = useState<'all' | ServiceRequestStatus>('all');
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const [preventiveConflict, setPreventiveConflict] = useState<any>(null);
+  const [pendingPreventiveRequest, setPendingPreventiveRequest] = useState<ServiceRequestRow | null>(null);
+  const [preventivePlanOptions, setPreventivePlanOptions] = useState<{ id: string; name: string; next_due_date: string }[]>([]);
+  const [selectedPreventivePlanId, setSelectedPreventivePlanId] = useState('');
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [editingRequest, setEditingRequest] = useState<ServiceRequestRow | null>(null);
   const [form, setForm] = useState(emptyForm);
@@ -146,7 +153,7 @@ export function ServiceRequestAdmin({
       supabase
         .from('service_requests')
         .select(
-        `id, request_number, tenant_id, unit_id, cost_center_id, asset_id, title, description, category, priority, status, requested_by, requested_at, converted_to_work_order_id, triage_notes, estimated_service_cost_cents, estimated_material_cost_cents, estimated_total_cost_cents, triaged_at, triaged_by, approved_at, approved_by,
+        `id, request_number, tenant_id, unit_id, cost_center_id, asset_id, title, description, category, maintenance_type, priority, status, requested_by, requested_at, converted_to_work_order_id, triage_notes, estimated_service_cost_cents, estimated_material_cost_cents, estimated_total_cost_cents, triaged_at, triaged_by, approved_at, approved_by,
         assets(name),
         units(name),
         cost_centers(name),
@@ -268,6 +275,7 @@ export function ServiceRequestAdmin({
       title: request.title,
       description: request.description ?? '',
       category: request.category,
+      maintenance_type: request.maintenance_type,
       priority: request.priority,
       unit_id: request.unit_id,
       cost_center_id: request.cost_center_id,
@@ -340,6 +348,7 @@ export function ServiceRequestAdmin({
       title: form.title.trim(),
       description: form.description.trim() || null,
       category: form.category,
+      maintenance_type: form.maintenance_type,
       priority: form.priority,
       unit_id: form.unit_id,
       cost_center_id: form.cost_center_id,
@@ -389,7 +398,7 @@ export function ServiceRequestAdmin({
           requested_by: currentUserId,
         })
         .select(
-          'id, request_number, tenant_id, unit_id, cost_center_id, asset_id, title, description, category, priority, status, requested_by, requested_at, converted_to_work_order_id, triage_notes, estimated_service_cost_cents, estimated_material_cost_cents, estimated_total_cost_cents, triaged_at, triaged_by, approved_at, approved_by',
+          'id, request_number, tenant_id, unit_id, cost_center_id, asset_id, title, description, category, maintenance_type, priority, status, requested_by, requested_at, converted_to_work_order_id, triage_notes, estimated_service_cost_cents, estimated_material_cost_cents, estimated_total_cost_cents, triaged_at, triaged_by, approved_at, approved_by',
         )
         .single();
 
@@ -469,8 +478,22 @@ export function ServiceRequestAdmin({
     setIsSaving(false);
   }
 
-  async function convertToWorkOrder(request: ServiceRequestRow) {
+  async function convertToWorkOrder(request: ServiceRequestRow, selectedPlanId?: string) {
     if (!isTenantAdmin) return;
+
+    if (request.maintenance_type === 'preventive' && request.asset_id && !selectedPlanId) {
+      const { data: plans, error: planError } = await supabase.from('maintenance_plans')
+        .select('id,name,next_due_date').eq('tenant_id', tenantId)
+        .eq('asset_id', request.asset_id).eq('is_active', true).order('next_due_date');
+      if (planError || !plans?.length) {
+        setErrorMessage(planError?.message ?? 'Não há plano preventivo ativo para este ativo. Configure-o em Preventivas.');
+        return;
+      }
+      setPreventivePlanOptions(plans);
+      setSelectedPreventivePlanId(plans.length === 1 ? plans[0].id : '');
+      setPendingPreventiveRequest(request);
+      return;
+    }
 
     if (
       !window.confirm(
@@ -483,6 +506,72 @@ export function ServiceRequestAdmin({
     setIsSaving(true);
     setMessage('');
     setErrorMessage('');
+
+    if (request.maintenance_type === 'preventive' && request.asset_id) {
+      const { data: plans, error: planError } = await supabase
+        .from('maintenance_plans')
+        .select('id, next_due_date, is_active')
+        .eq('tenant_id', tenantId)
+        .eq('asset_id', request.asset_id)
+        .eq('is_active', true).eq('id', selectedPlanId!);
+      if (planError || !plans?.length) {
+        setErrorMessage('Não há plano preventivo ativo para este ativo. Abra Preventivas para configurar o plano antes de aprovar.');
+        setIsSaving(false);
+        return;
+      }
+      const plan = plans[0];
+      const { count: activityCount, error: activityError } = await supabase.from('preventive_plan_activities')
+        .select('id', { head: true, count: 'exact' }).eq('tenant_id', tenantId).eq('plan_id', plan.id);
+      if (activityError || !activityCount) {
+        setErrorMessage(activityError?.message ?? 'O plano selecionado não possui atividades persistidas. Configure o checklist antes de aprovar.');
+        setIsSaving(false);
+        return;
+      }
+      const { data, error } = await supabase.rpc('create_preventive_cycle_work_order', {
+        target_plan_id: plan.id,
+        target_original_due_date: plan.next_due_date,
+      });
+      const rpcOrder = Array.isArray(data) ? data[0] : data;
+      const newOrder = rpcOrder ? { id: rpcOrder.work_order_id, order_number: rpcOrder.order_number } : null;
+      if (error || !newOrder) {
+        const { data: blocking } = await supabase.from('work_orders')
+          .select('id, order_number, status, scheduled_for, preventive_cycle_key, asset_id, assets(name)')
+          .eq('tenant_id', tenantId).eq('asset_id', request.asset_id).eq('type', 'preventive')
+          .not('status', 'in', '("completed","cancelled")');
+        setPreventiveConflict({ request, blocking: blocking ?? [], message: error?.message ?? 'Conflito de ciclo preventivo.' });
+        setErrorMessage('Conflito de ciclo preventivo. Veja o painel abaixo.');
+        setIsSaving(false);
+        return;
+      }
+      const { data: linkedRequest, error: linkError } = await supabase.from('service_requests').update({
+        status: 'converted_to_wo',
+        converted_to_work_order_id: newOrder.id,
+        approved_at: new Date().toISOString(),
+        approved_by: currentUserId,
+      }).eq('id', request.id).select('id').maybeSingle();
+      if (linkError || !linkedRequest) {
+        setErrorMessage(`OS preventiva #${newOrder.order_number} criada, mas a solicitação não foi vinculada: ${linkError?.message ?? 'atualização não confirmada'}. Não tente gerar outra OS; confira a OS existente.`);
+        setIsSaving(false);
+        return;
+      }
+      const { data: initializedCount, error: initError } = await supabase.rpc('initialize_preventive_checklist', {
+        target_order_id: newOrder.id,
+      });
+      setEditingRequest({ ...request, status: 'converted_to_wo', converted_to_work_order_id: newOrder.id, converted_wo_number: newOrder.order_number, approved_at: new Date().toISOString(), approved_by: currentUserId });
+      setForm((current) => ({ ...current, status: 'converted_to_wo' }));
+      setPendingPreventiveRequest(null);
+      if (initError || !initializedCount) setErrorMessage(`OS #${newOrder.order_number} vinculada, mas o checklist não foi inicializado: ${initError?.message ?? 'nenhuma atividade criada'}. Abra a OS para conferir.`);
+      else setMessage(`Solicitação #${request.request_number} aprovada, OS preventiva #${newOrder.order_number} vinculada e ${initializedCount} atividades inicializadas.`);
+      setIsSaving(false);
+      await loadData();
+      return;
+    }
+
+    if (request.maintenance_type === 'preventive' && !request.asset_id) {
+      setErrorMessage('Solicitação preventiva precisa de ativo vinculado para localizar o plano. Vincule o ativo e tente novamente.');
+      setIsSaving(false);
+      return;
+    }
 
     const { data, error } = await supabase.rpc(
       'approve_service_request_and_create_work_order',
@@ -516,8 +605,39 @@ export function ServiceRequestAdmin({
     await loadData();
   }
 
+  if (preventiveConflict) {
+    return (
+      <div className="panel">
+        <h3>Conflito de ciclo preventivo</h3>
+        <p>{preventiveConflict.message}</p>
+        {(preventiveConflict.blocking ?? []).map((wo: any) => (
+          <div key={wo.id} className="panel" style={{ marginTop: 8 }}>
+            <p>OS #{wo.order_number} · {wo.assets?.name ?? 'Ativo'} · Status: {wo.status} · Data: {wo.scheduled_for}</p>
+            <p>Ciclo: {wo.preventive_cycle_key ?? 'histórica sem ciclo comprovado'}</p>
+            <button type="button" className="secondary" onClick={() => { setPreventiveConflict(null); onOpenOrders(); }}>Abrir OS existente</button>
+          </div>
+        ))}
+        <button type="button" className="secondary" onClick={() => setPreventiveConflict(null)}>Fechar</button>
+      </div>
+    );
+  }
+
   return (
     <div>
+      {pendingPreventiveRequest && <section className="panel" aria-label="Selecionar plano preventivo">
+        <div className="panel-head"><div><p className="eyebrow">SOLICITAÇÃO PREVENTIVA</p><h3>Selecionar plano para a OS</h3></div></div>
+        <p>Ativo da solicitação #{pendingPreventiveRequest.request_number}. Escolha o plano ativo e confira seu checklist antes de gerar a OS.</p>
+        <label className="field"><span>Plano preventivo *</span><select value={selectedPreventivePlanId}
+          onChange={(event) => setSelectedPreventivePlanId(event.target.value)}>
+          <option value="">Selecione</option>
+          {preventivePlanOptions.map((plan) => <option key={plan.id} value={plan.id}>{plan.name} · próximo ciclo {plan.next_due_date}</option>)}
+        </select></label>
+        <div className="form-actions">
+          <button type="button" disabled={!selectedPreventivePlanId || isSaving}
+            onClick={() => void convertToWorkOrder(pendingPreventiveRequest, selectedPreventivePlanId)}>Gerar OS pelo plano selecionado</button>
+          <button type="button" className="secondary" onClick={() => setPendingPreventiveRequest(null)}>Cancelar</button>
+        </div>
+      </section>}
       {!isDetailView && <div className="user-admin-actions">
         <div className="asset-search">
           <select
@@ -652,6 +772,21 @@ export function ServiceRequestAdmin({
                   setForm({ ...form, title: event.target.value })
                 }
               />
+            </label>
+
+            <label className="field">
+              <span>Tipo de manutenção</span>
+              <select
+                value={form.maintenance_type ?? ''}
+                onChange={(event) =>
+                  setForm({ ...form, maintenance_type: (event.target.value || null) as ServiceRequestMaintenanceType })
+                }
+                required
+              >
+                <option value="">Selecione</option>
+                <option value="corrective">Corretiva</option>
+                <option value="preventive">Preventiva</option>
+              </select>
             </label>
 
             <label className="field">

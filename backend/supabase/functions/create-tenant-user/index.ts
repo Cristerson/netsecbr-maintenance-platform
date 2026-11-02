@@ -320,6 +320,7 @@ Deno.serve(async (request) => {
       user_id: created.user.id,
       role,
       is_active: true,
+      units_access_all: role === 'tenant_admin',
     })
     if (newMembershipError) {
       await supabaseAdmin.auth.admin.deleteUser(created.user.id)

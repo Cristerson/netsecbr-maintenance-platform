@@ -1,14 +1,19 @@
 import { type FormEvent, useCallback, useEffect, useState } from 'react';
 import { Plus, RefreshCw, Wrench, X } from 'lucide-react';
 import { supabase } from './supabase';
+import { PreventiveTemplateLibrary, type PlanChecklistActivity } from './preventive-template-library';
 
 type Props = {
   tenantId: string;
   canManage: boolean;
+  focus?: { assetId: string; planId?: string; create?: boolean } | null;
+  onFocusConsumed?: () => void;
+  onOpenOrders?: (workOrderId: string) => void;
 };
 
 // Situação exibida na lista. "Atrasada" é calculada apenas na tela, nunca gravada no banco.
 type PlanSituation = 'active' | 'inactive' | 'late';
+type CyclePolicy = 'interval' | 'annual_calendar';
 
 type PreventivePlan = {
   id: string;
@@ -16,12 +21,14 @@ type PreventivePlan = {
   asset_id: string;
   name: string;
   periodicity_days: number;
+  cycle_policy: CyclePolicy;
   next_due_date: string;
   assigned_to: string | null;
   is_active: boolean;
   notes: string | null;
   created_at: string;
   updated_at: string;
+  preventive_template_id: string | null;
 };
 
 type PreventivePlanRow = PreventivePlan & {
@@ -35,7 +42,10 @@ type Asset = {
   code: string;
   name: string;
   status: string;
+  is_robot: boolean;
 };
+
+const MARV_TEMPLATE_ID = 'eb7a15e6-411d-43d9-8a14-ffed237a97e9';
 
 type TeamMember = {
   id: string;
@@ -43,11 +53,12 @@ type TeamMember = {
   role: string;
 };
 
-// Retorno de public.create_preventive_work_order_from_plan (returns table).
+// Retorno de public.create_preventive_cycle_work_order (returns table).
 type PreventiveWorkOrderResult = {
   work_order_id: string;
   order_number: number;
   next_due_date: string;
+  was_existing: boolean;
 };
 
 const situationLabels: Record<PlanSituation, string> = {
@@ -60,10 +71,13 @@ const emptyForm = {
   asset_id: '',
   name: '',
   periodicity_days: '30',
+  cycle_policy: 'interval' as CyclePolicy,
   next_due_date: '',
   assigned_to: '',
   is_active: true,
   notes: '',
+  template_id: '',
+  activities: [] as PlanChecklistActivity[],
 };
 
 function formatRole(role: string) {
@@ -111,7 +125,7 @@ function situationClassName(situation: PlanSituation) {
   return `badge ${situation === 'active' ? 'asset-status-active' : 'asset-status-inactive'}`;
 }
 
-export function PreventivePlanAdmin({ tenantId, canManage }: Props) {
+export function PreventivePlanAdmin({ tenantId, canManage, focus, onFocusConsumed, onOpenOrders }: Props) {
   const [plans, setPlans] = useState<PreventivePlanRow[]>([]);
   const [assets, setAssets] = useState<Asset[]>([]);
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
@@ -123,7 +137,9 @@ export function PreventivePlanAdmin({ tenantId, canManage }: Props) {
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [editingPlan, setEditingPlan] = useState<PreventivePlanRow | null>(null);
   const [form, setForm] = useState(emptyForm);
+  const [checklistDirty, setChecklistDirty] = useState(false);
   const [message, setMessage] = useState('');
+  const [linkedOrderId, setLinkedOrderId] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState('');
   const isDetailView = isFormOpen && editingPlan !== null;
 
@@ -137,16 +153,18 @@ export function PreventivePlanAdmin({ tenantId, canManage }: Props) {
       { data: assetData, error: assetError },
       { data: membershipData, error: membershipError },
     ] = await Promise.all([
-      supabase
-        .from('maintenance_plans')
-        .select(
-          'id, tenant_id, asset_id, name, periodicity_days, next_due_date, assigned_to, is_active, notes, created_at, updated_at, assets(name, code)',
-        )
-        .eq('tenant_id', tenantId)
-        .order('next_due_date'),
+      (async () => {
+        const fields = 'id, tenant_id, asset_id, name, periodicity_days, cycle_policy, next_due_date, assigned_to, is_active, notes, created_at, updated_at, assets(name, code)';
+        const current = await supabase.from('maintenance_plans')
+          .select(`${fields}, preventive_template_id`).eq('tenant_id', tenantId).order('next_due_date');
+        if (!current.error || current.error.code !== '42703') return current;
+        const legacy = await supabase.from('maintenance_plans')
+          .select(fields).eq('tenant_id', tenantId).order('next_due_date');
+        return { ...legacy, data: legacy.data?.map((plan) => ({ ...plan, preventive_template_id: null })) ?? null };
+      })(),
       supabase
         .from('assets')
-        .select('id, code, name, status')
+        .select('id, code, name, status, asset_categories(is_robot)')
         .eq('tenant_id', tenantId)
         .is('deleted_at', null)
         .order('name'),
@@ -173,7 +191,10 @@ export function PreventivePlanAdmin({ tenantId, canManage }: Props) {
       return;
     }
 
-    setAssets((assetData ?? []) as Asset[]);
+    setAssets((assetData ?? []).map((asset: any) => ({
+      id: asset.id, code: asset.code, name: asset.name, status: asset.status,
+      is_robot: asset.asset_categories?.is_robot === true,
+    })));
 
     const userIds = (membershipData ?? []).map((membership) => membership.user_id);
     const namesById = new Map<string, string | null>();
@@ -245,13 +266,29 @@ export function PreventivePlanAdmin({ tenantId, canManage }: Props) {
     return asset ? `${asset.code} · ${asset.name}` : 'Ativo removido';
   }
 
-  function openNewPlan() {
+  async function openNewPlan(assetId?: string) {
     setMessage('');
     setErrorMessage('');
     setEditingPlan(null);
+    setChecklistDirty(false);
+    const selectedAssetId = assetId ?? availableAssets[0]?.id ?? '';
+    const isRobot = assets.find((asset) => asset.id === selectedAssetId)?.is_robot;
+    let suggestedActivities: PlanChecklistActivity[] = [];
+    if (isRobot) {
+      const { data, error } = await supabase.from('preventive_template_activities')
+        .select('title,instruction,is_optional,requires_photo')
+        .eq('template_id', MARV_TEMPLATE_ID).order('position');
+      if (error) setErrorMessage(`Não foi possível carregar o Modelo MARV: ${error.message}`);
+      else suggestedActivities = (data ?? []).map((activity) => ({
+        title: activity.title, instruction: activity.instruction ?? '',
+        is_optional: activity.is_optional, requires_photo: activity.requires_photo,
+      }));
+    }
     setForm({
       ...emptyForm,
-      asset_id: availableAssets[0]?.id ?? '',
+      asset_id: selectedAssetId,
+      template_id: suggestedActivities.length ? MARV_TEMPLATE_ID : '',
+      activities: suggestedActivities,
     });
     setIsFormOpen(true);
   }
@@ -260,17 +297,32 @@ export function PreventivePlanAdmin({ tenantId, canManage }: Props) {
     setMessage('');
     setErrorMessage('');
     setEditingPlan(plan);
+    setChecklistDirty(false);
     setForm({
       asset_id: plan.asset_id,
       name: plan.name,
       periodicity_days: String(plan.periodicity_days),
+      cycle_policy: plan.cycle_policy,
       next_due_date: plan.next_due_date,
       assigned_to: plan.assigned_to ?? '',
       is_active: plan.is_active,
       notes: plan.notes ?? '',
+      template_id: plan.preventive_template_id ?? '',
+      activities: [],
     });
     setIsFormOpen(true);
   }
+
+  useEffect(() => {
+    if (!focus || isLoading) return;
+    if (focus.create && canManage) void openNewPlan(focus.assetId);
+    else {
+      const plan = plans.find((item) => item.id === focus.planId && item.asset_id === focus.assetId);
+      if (plan) openEditPlan(plan);
+      else setErrorMessage('Plano não encontrado para este ativo.');
+    }
+    onFocusConsumed?.();
+  }, [focus, isLoading, plans]);
 
   async function savePlan(event: FormEvent) {
     event.preventDefault();
@@ -292,8 +344,20 @@ export function PreventivePlanAdmin({ tenantId, canManage }: Props) {
       return;
     }
 
+    if (form.cycle_policy === 'annual_calendar' && ![365, 366].includes(periodicity)) {
+      setErrorMessage('Para o ciclo anual, a periodicidade deve ser 365 ou 366 dias.');
+      return;
+    }
+
     if (!form.next_due_date) {
       setErrorMessage('Informe a próxima execução do plano preventivo.');
+      return;
+    }
+
+    if ((!editingPlan || checklistDirty) &&
+        (!form.activities.length || form.activities.length > 100 ||
+         form.activities.some((activity) => activity.title.trim().length < 3))) {
+      setErrorMessage('Inclua de 1 a 100 atividades com título de pelo menos 3 caracteres.');
       return;
     }
 
@@ -305,18 +369,54 @@ export function PreventivePlanAdmin({ tenantId, canManage }: Props) {
       asset_id: form.asset_id,
       name: form.name.trim(),
       periodicity_days: periodicity,
+      cycle_policy: form.cycle_policy,
       next_due_date: form.next_due_date,
       assigned_to: form.assigned_to || null,
       is_active: form.is_active,
       notes: form.notes.trim() || null,
     };
 
-    const { error } = editingPlan
-      ? await supabase.from('maintenance_plans').update(payload).eq('id', editingPlan.id)
-      : await supabase.from('maintenance_plans').insert({ ...payload, tenant_id: tenantId });
+    const { data: savedPlan, error } = editingPlan
+      ? await supabase.from('maintenance_plans').update(payload).eq('id', editingPlan.id).select('id').single()
+      : await supabase.from('maintenance_plans').insert({ ...payload, tenant_id: tenantId }).select('id').single();
 
     if (error) {
       setErrorMessage(`Não foi possível salvar o plano preventivo: ${error.message}`);
+    } else if (savedPlan && (!editingPlan || checklistDirty)) {
+      const { data: savedCount, error: templateError } = await supabase.rpc('configure_preventive_plan_checklist', {
+        target_plan_id: savedPlan.id,
+        target_template_id: form.template_id || null,
+        target_activities: form.activities.map((activity) => ({
+          title: activity.title.trim(), instruction: activity.instruction.trim(),
+          is_optional: activity.is_optional, requires_photo: activity.requires_photo,
+        })),
+      });
+      if (templateError) {
+        setErrorMessage(`Plano salvo, mas o checklist não foi aplicado: ${templateError.message}. Corrija e tente novamente.`);
+        await loadData();
+        setIsSaving(false);
+        return;
+      }
+      const { data: verifiedActivities, error: verifyError } = await supabase
+        .from('preventive_plan_activities').select('position,title,instruction,is_optional,requires_photo')
+        .eq('tenant_id', tenantId).eq('plan_id', savedPlan.id).order('position');
+      const verified = !verifyError && savedCount === form.activities.length &&
+        verifiedActivities?.length === form.activities.length &&
+        verifiedActivities.every((activity, index) =>
+          activity.position === index + 1 && activity.title === form.activities[index].title.trim() &&
+          (activity.instruction ?? '') === form.activities[index].instruction.trim() &&
+          activity.is_optional === form.activities[index].is_optional &&
+          activity.requires_photo === form.activities[index].requires_photo);
+      if (!verified) {
+        setErrorMessage(`Plano salvo, mas não foi possível confirmar as atividades persistidas: ${verifyError?.message ?? 'contagem ou conteúdo divergente'}. Atualize e confira antes de gerar OS.`);
+        await loadData();
+        setIsSaving(false);
+        return;
+      }
+      setMessage('Plano preventivo e checklist próprio salvos com sucesso.');
+      setIsFormOpen(false);
+      setEditingPlan(null);
+      await loadData();
     } else {
       setMessage(
         editingPlan
@@ -373,6 +473,13 @@ export function PreventivePlanAdmin({ tenantId, canManage }: Props) {
   async function generatePreventiveWorkOrder(plan: PreventivePlanRow) {
     if (!canManage || !plan.is_active) return;
 
+    const { count, error: checklistError } = await supabase.from('preventive_plan_activities')
+      .select('id', { count: 'exact', head: true }).eq('tenant_id', tenantId).eq('plan_id', plan.id);
+    if (checklistError || !count) {
+      setErrorMessage(checklistError?.message ?? 'Este plano ainda não possui atividades persistidas. Configure o checklist antes de gerar a OS.');
+      return;
+    }
+
     if (
       !window.confirm(
         'Gerar a OS preventiva para esta atividade? A próxima execução do plano será atualizada.',
@@ -384,10 +491,11 @@ export function PreventivePlanAdmin({ tenantId, canManage }: Props) {
     setIsGeneratingWorkOrder(true);
     setMessage('');
     setErrorMessage('');
+    setLinkedOrderId(null);
 
     const { data, error } = await supabase.rpc(
-      'create_preventive_work_order_from_plan',
-      { target_plan_id: plan.id },
+      'create_preventive_cycle_work_order',
+      { target_plan_id: plan.id, target_original_due_date: plan.next_due_date },
     );
 
     const generatedWorkOrder = (data?.[0] ?? null) as PreventiveWorkOrderResult | null;
@@ -403,15 +511,29 @@ export function PreventivePlanAdmin({ tenantId, canManage }: Props) {
       return;
     }
 
-    // Sucesso: permanece no detalhe exibindo a nova próxima execução devolvida pela RPC.
-    setEditingPlan({
-      ...plan,
-      next_due_date: generatedWorkOrder.next_due_date,
-      updated_at: new Date().toISOString(),
+    if (!generatedWorkOrder.was_existing) {
+      setEditingPlan({
+        ...plan,
+        next_due_date: generatedWorkOrder.next_due_date,
+        updated_at: new Date().toISOString(),
+      });
+      setForm((current) => ({ ...current, next_due_date: generatedWorkOrder.next_due_date }));
+    }
+    const { data: initializedCount, error: initError } = await supabase.rpc('initialize_preventive_checklist', {
+      target_order_id: generatedWorkOrder.work_order_id,
     });
-    setForm((current) => ({ ...current, next_due_date: generatedWorkOrder.next_due_date }));
+    if (initError || !initializedCount) {
+      setErrorMessage(`OS #${generatedWorkOrder.order_number} gerada, mas o checklist não foi confirmado: ${initError?.message ?? 'nenhuma atividade inicializada'}. Abra a OS antes de prosseguir.`);
+      setLinkedOrderId(generatedWorkOrder.work_order_id);
+      setIsGeneratingWorkOrder(false);
+      await loadData();
+      return;
+    }
     setIsGeneratingWorkOrder(false);
-    setMessage(`OS preventiva #${generatedWorkOrder.order_number} gerada com sucesso.`);
+    setLinkedOrderId(generatedWorkOrder.work_order_id);
+    setMessage(generatedWorkOrder.was_existing
+      ? `Já existe a OS preventiva #${generatedWorkOrder.order_number} para este ciclo. Abra Ordens de serviço para consultá-la.`
+      : `OS preventiva #${generatedWorkOrder.order_number} gerada com sucesso.`);
     await loadData();
   }
 
@@ -445,7 +567,7 @@ export function PreventivePlanAdmin({ tenantId, canManage }: Props) {
           {canManage && (
             <button
               className="button-with-icon"
-              onClick={openNewPlan}
+              onClick={() => void openNewPlan()}
               disabled={isSaving || isLoading}
               title="Cadastrar nova preventiva"
             >
@@ -468,6 +590,11 @@ export function PreventivePlanAdmin({ tenantId, canManage }: Props) {
       {message && (
         <div className="operation-toast operation-toast-success" role="status">
           <span>{message}</span>
+          {linkedOrderId && onOpenOrders && (
+            <button type="button" onClick={() => onOpenOrders(linkedOrderId)}>
+              Ver OS
+            </button>
+          )}
           <button
             type="button"
             aria-label="Fechar mensagem"
@@ -540,6 +667,13 @@ export function PreventivePlanAdmin({ tenantId, canManage }: Props) {
             </div>
           )}
 
+          <PreventiveTemplateLibrary tenantId={tenantId} assetId={form.asset_id} planId={editingPlan?.id ?? null}
+            templateId={form.template_id} activities={form.activities}
+            onChange={(templateId, activities, changed) => {
+              setForm((current) => ({ ...current, template_id: templateId, activities }));
+              if (changed) setChecklistDirty(true);
+            }} />
+
           <div className="asset-form-grid">
             <label className="field">
               <span>Ativo *</span>
@@ -583,6 +717,21 @@ export function PreventivePlanAdmin({ tenantId, canManage }: Props) {
                   setForm({ ...form, periodicity_days: event.target.value })
                 }
               />
+            </label>
+
+            <label className="field">
+              <span>Regra do ciclo *</span>
+              <select
+                value={form.cycle_policy}
+                onChange={(event) => {
+                  const cyclePolicy = event.target.value as CyclePolicy;
+                  setForm({ ...form, cycle_policy: cyclePolicy,
+                    periodicity_days: cyclePolicy === 'annual_calendar' ? '365' : form.periodicity_days });
+                }}
+              >
+                <option value="interval">Intervalo em dias (ciclo por vencimento)</option>
+                <option value="annual_calendar">Anual (ciclo pelo ano programado)</option>
+              </select>
             </label>
 
             <label className="field">

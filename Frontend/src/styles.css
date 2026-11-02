@@ -866,3 +866,109 @@ header h1 { font-size: 25px; }
 .avatar { box-shadow: 0 0 0 3px #fff4dd; }
 @media (max-width: 900px) { main { margin-left: 0; width: 100%; } }
 .data-error { display: block; margin-bottom: 14px; padding: 10px 14px; border: 1px solid #f3c7c7; border-radius: 8px; background: #fdf3f3; color: #a13c3c; font-size: 13px; }
+/* Impressão do relatório local: o navegador oferece "Salvar como PDF". */
+.marv-local-report-activity {
+  border-top: 1px solid #d8e3f0;
+  padding-top: 12px;
+  margin-top: 12px;
+}
+
+.marv-local-report figure {
+  display: inline-block;
+  vertical-align: top;
+  width: min(220px, 45%);
+  margin: 8px 12px 8px 0;
+}
+
+.marv-local-report figure img {
+  display: block;
+  max-width: 100%;
+  max-height: 180px;
+  object-fit: contain;
+}
+
+.marv-local-report .marv-local-signature {
+  display: block;
+  max-width: 360px;
+  max-height: 150px;
+}
+
+@media print {
+  @page { size: A4; margin: 15mm; }
+
+  body:has(#marv-preventive-print) * {
+    visibility: hidden !important;
+  }
+
+  body:has(#marv-preventive-print) #marv-preventive-print,
+  body:has(#marv-preventive-print) #marv-preventive-print * {
+    visibility: visible !important;
+  }
+
+  #marv-preventive-print {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    box-shadow: none;
+    color: #101b32;
+    background: white;
+  }
+
+  #marv-preventive-print figure,
+  #marv-preventive-print .marv-local-report-activity {
+    break-inside: avoid;
+  }
+}
+
+.preventive-checklist-execution,
+.preventive-template-library {
+  padding: 20px;
+  min-width: 0;
+}
+
+.preventive-checklist-execution textarea,
+.preventive-template-library textarea {
+  width: 100%;
+  max-width: 100%;
+  border: 1px solid #d8e3f0;
+  border-radius: 7px;
+  padding: 10px;
+  font: inherit;
+}
+
+.preventive-template-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.preventive-template-options > button,
+.preventive-template-activity { border: 1px solid #d8e3f0; border-radius: 9px; padding: 14px; }
+.preventive-template-options > button { display: grid; gap: 5px; text-align: left; cursor: pointer; }
+.preventive-template-options > button[aria-pressed="true"] { border-color: #0c5da8; background: #eaf5ff; }
+.preventive-template-options > button span { font-size: 12px; color: #63748d; }
+.preventive-template-note { color: #63748d; font-size: 12px; }
+.preventive-template-activities { display: grid; gap: 12px; }
+.preventive-template-activity { display: grid; gap: 10px; min-width: 0; }
+.preventive-template-activity-head,
+.preventive-template-flags { display: flex; gap: 10px; align-items: center; justify-content: space-between; flex-wrap: wrap; }
+.preventive-template-activity-head > div { display: flex; gap: 6px; flex-wrap: wrap; }
+.preventive-template-flags { justify-content: flex-start; }
+.preventive-template-activity .field { min-width: 0; }
+.preventive-template-activity input[type="text"] { max-width: 100%; }
+.asset-related-section { margin-top: 24px; padding-top: 20px; border-top: 1px solid #d8e3f0; }
+.asset-related-section .data-row { gap: 12px; }
+.preventive-order-tabs { display: flex; gap: 8px; margin-bottom: 14px; flex-wrap: wrap; }
+.preventive-order-tabs button.active { background: #0c5da8; color: #fff; }
+.preventive-copy-plan { display: flex; align-items: end; gap: 10px; flex-wrap: wrap; margin: 12px 0; }
+.preventive-copy-plan .field { flex: 1 1 220px; }
+
+@media (max-width: 600px) {
+  .preventive-checklist-execution,
+  .preventive-template-library { padding: 14px; }
+  .preventive-checklist-execution .panel-head,
+  .preventive-template-library .panel-head { flex-wrap: wrap; gap: 10px; }
+  .preventive-checklist-execution button,
+  .preventive-template-library button { max-width: 100%; min-height: 42px; }
+  .preventive-checklist-execution .panel { min-width: 0; overflow-wrap: anywhere; }
+  .preventive-template-options { grid-template-columns: 1fr; }
+}

@@ -32,6 +32,12 @@ type Permission = {
   name: string;
 };
 
+type UnitOption = {
+  id: string;
+  name: string;
+  code: string;
+};
+
 function getMemberName(member: Membership) {
   return member.full_name || 'Usuário sem nome';
 }
@@ -79,6 +85,9 @@ export function UserAdmin({ tenantId, currentUserId, currentName, currentRole, l
   const [editRole, setEditRole] = useState('navigation');
   const [editActive, setEditActive] = useState(true);
   const [assignedPermissions, setAssignedPermissions] = useState<string[]>([]);
+  const [units, setUnits] = useState<UnitOption[]>([]);
+  const [unitAccessAll, setUnitAccessAll] = useState(false);
+  const [selectedUnitIds, setSelectedUnitIds] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [message, setMessage] = useState('');
@@ -195,6 +204,14 @@ const [newUser, setNewUser] = useState({
     setPermissions((catalog ?? []) as Permission[]);
   }
 
+  const { data: unitsData } = await supabase
+    .from('units')
+    .select('id, name, code')
+    .eq('tenant_id', tenantId)
+    .order('name');
+
+  setUnits((unitsData ?? []) as UnitOption[]);
+
   setIsLoading(false);
 }, [tenantId]);
 
@@ -223,6 +240,23 @@ const [newUser, setNewUser] = useState({
     }
 
     setAssignedPermissions((data ?? []).map((item) => item.permission_code));
+
+    const { data: membershipRow } = await supabase
+      .from('tenant_memberships')
+      .select('units_access_all, role')
+      .eq('id', member.id)
+      .maybeSingle();
+
+    setUnitAccessAll(
+      membershipRow?.role === 'tenant_admin' ? true : Boolean(membershipRow?.units_access_all),
+    );
+
+    const { data: accessRows } = await supabase
+      .from('membership_unit_access')
+      .select('unit_id')
+      .eq('membership_id', member.id);
+
+    setSelectedUnitIds((accessRows ?? []).map((item) => item.unit_id));
   }
 
   async function setTemporaryPassword(event: FormEvent<HTMLFormElement>) {
@@ -404,6 +438,7 @@ const [newUser, setNewUser] = useState({
         .update({
           ...(roleChanged ? { role: nextRole } : {}),
           ...(activeChanged ? { is_active: nextActive } : {}),
+          ...(roleChanged && nextRole === 'tenant_admin' ? { units_access_all: true } : {}),
         })
         .eq('id', selectedMember.id);
 
@@ -433,6 +468,68 @@ const [newUser, setNewUser] = useState({
     setIsSaving(false);
   }
 
+  function toggleUnit(unitId: string) {
+    setSelectedUnitIds((current) =>
+      current.includes(unitId)
+        ? current.filter((id) => id !== unitId)
+        : [...current, unitId],
+    );
+  }
+
+  async function saveUnitAccess() {
+    if (!selectedMember) return;
+
+    setIsSaving(true);
+    setMessage('');
+    setErrorMessage('');
+
+    const nextAll = selectedMember.role === 'tenant_admin' ? true : unitAccessAll;
+
+    const { error: membershipError } = await supabase
+      .from('tenant_memberships')
+      .update({ units_access_all: nextAll })
+      .eq('id', selectedMember.id);
+
+    if (membershipError) {
+      setErrorMessage(`Não foi possível atualizar o acesso às unidades: ${membershipError.message}`);
+      setIsSaving(false);
+      return;
+    }
+
+    const { error: deleteError } = await supabase
+      .from('membership_unit_access')
+      .delete()
+      .eq('membership_id', selectedMember.id);
+
+    if (deleteError) {
+      setErrorMessage(`Não foi possível atualizar o acesso às unidades: ${deleteError.message}`);
+      setIsSaving(false);
+      return;
+    }
+
+    if (!nextAll && selectedUnitIds.length > 0) {
+      const rows = selectedUnitIds.map((unitId) => ({
+        membership_id: selectedMember.id,
+        tenant_id: tenantId,
+        unit_id: unitId,
+      }));
+
+      const { error: insertError } = await supabase
+        .from('membership_unit_access')
+        .insert(rows);
+
+      if (insertError) {
+        setErrorMessage(`Não foi possível atualizar o acesso às unidades: ${insertError.message}`);
+        setIsSaving(false);
+        return;
+      }
+    }
+
+    if (selectedMember.role === 'tenant_admin') setUnitAccessAll(true);
+    setMessage('Acesso às unidades atualizado com sucesso.');
+    setIsSaving(false);
+  }
+
   function closeDetail() {
     setSelectedMember(null);
     setIsPasswordResetOpen(false);
@@ -442,6 +539,8 @@ const [newUser, setNewUser] = useState({
     setEditFullName('');
     setEditRole('navigation');
     setEditActive(true);
+    setUnitAccessAll(false);
+    setSelectedUnitIds([]);
   }
 async function createUser(event: FormEvent<HTMLFormElement>) {
   event.preventDefault();
@@ -857,6 +956,50 @@ autoComplete="new-password"
               </span>
             </label>
           ))}
+
+          <div className="panel-head" style={{ marginTop: '1rem' }}>
+            <div>
+              <p className="eyebrow">UNIDADES COM ACESSO</p>
+              <h3>Visibilidade de unidades</h3>
+            </div>
+          </div>
+
+          <label className="permission-option">
+            <span>
+              <input
+                type="checkbox"
+                disabled={isSaving || selectedMember.role === 'tenant_admin'}
+                checked={selectedMember.role === 'tenant_admin' ? true : unitAccessAll}
+                onChange={(event) => setUnitAccessAll(event.target.checked)}
+              />{' '}
+              Acesso a todas as unidades do cliente
+            </span>
+          </label>
+
+          {!(selectedMember.role === 'tenant_admin' ? true : unitAccessAll) && (
+            <div className="permission-list" style={{ marginTop: '0.5rem' }}>
+              {units.map((unit) => (
+                <label className="permission-option" key={unit.id}>
+                  <span>
+                    <input
+                      type="checkbox"
+                      disabled={isSaving}
+                      checked={selectedUnitIds.includes(unit.id)}
+                      onChange={() => toggleUnit(unit.id)}
+                    />{' '}
+                    {unit.name} ({unit.code})
+                  </span>
+                </label>
+              ))}
+              {units.length === 0 && <p>Nenhuma unidade cadastrada.</p>}
+            </div>
+          )}
+
+          <div className="form-actions" style={{ marginTop: '0.75rem' }}>
+            <button type="button" disabled={isSaving} onClick={() => void saveUnitAccess()}>
+              {isSaving ? 'Salvando...' : 'Salvar unidades'}
+            </button>
+          </div>
         </section>
       )}
     </div>

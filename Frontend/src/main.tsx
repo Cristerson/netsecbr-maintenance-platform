@@ -64,6 +64,8 @@ function App({ account }: { account: CurrentAccount }) {
     | 'client_admin'
     | 'netsecbr_admin'
   >('dashboard');
+  const [focusedWorkOrderId, setFocusedWorkOrderId] = useState<string | null>(null);
+  const [focusedPlan, setFocusedPlan] = useState<{ assetId: string; planId?: string; create?: boolean } | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const {
     assets,
@@ -308,6 +310,8 @@ function App({ account }: { account: CurrentAccount }) {
           <AssetAdmin
             tenantId={account.tenantId}
             canManage={canAccess('assets.manage')}
+            onOpenPlan={(assetId, planId) => { setFocusedPlan({ assetId, planId, create: !planId }); setPage('preventive_plans'); }}
+            onOpenOrder={(workOrderId) => { setFocusedWorkOrderId(workOrderId); setPage('orders'); }}
           />
         )}
 
@@ -328,7 +332,11 @@ function App({ account }: { account: CurrentAccount }) {
         {!isLoading && page === 'orders' && (
           <WorkOrderAdmin
             tenantId={account.tenantId}
+            focusWorkOrderId={focusedWorkOrderId}
+            onFocusConsumed={() => setFocusedWorkOrderId(null)}
             currentUserId={account.userId}
+            currentUserName={account.fullName}
+            tenantName={account.tenantName}
             isTenantAdmin={account.isTenantAdmin || account.isNetsecbrAdmin}
             canCreate={
               account.isNetsecbrAdmin ||
@@ -341,6 +349,12 @@ function App({ account }: { account: CurrentAccount }) {
           <PreventivePlanAdmin
             tenantId={account.tenantId}
             canManage={account.isTenantAdmin || account.isNetsecbrAdmin}
+            focus={focusedPlan}
+            onFocusConsumed={() => setFocusedPlan(null)}
+            onOpenOrders={(workOrderId) => {
+              setFocusedWorkOrderId(workOrderId);
+              setPage('orders');
+            }}
           />
         )}
         {!isLoading && page === 'help' && <HelpCenterPage />}

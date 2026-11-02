@@ -7,6 +7,7 @@ Todas as mudanças relevantes do projeto serão registradas aqui.
 ### Adicionado
 
 - Estrutura documental do produto SaaS NETSECBR Maintenance Platform.
+- Diagnóstico rápido do MARV (`DIAGNOSTICO_RAPIDO_MARV.md`): status atual, matriz de funcionalidades, riscos e próximos passos.
 - Painel web inicial para ativos e ordens de serviço.
 - Identidade visual inicial da NETSECBR e logotipo oficial local.
 - Definição de tenants, unidades, centros de custo, pacotes de licença, cobrança e inadimplência.

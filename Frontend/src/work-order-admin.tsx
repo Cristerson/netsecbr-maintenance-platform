@@ -8,10 +8,15 @@ import {
   X,
 } from 'lucide-react';
 import { supabase } from './supabase';
+import { PreventiveChecklistExecution } from './preventive-checklist-execution';
 
 type Props = {
   tenantId: string;
+  focusWorkOrderId?: string | null;
+  onFocusConsumed?: () => void;
   currentUserId: string;
+  currentUserName: string;
+  tenantName: string;
   isTenantAdmin: boolean;
   canCreate: boolean;
 };
@@ -193,7 +198,11 @@ const emptyForm = {
 
 export function WorkOrderAdmin({
   tenantId,
+  focusWorkOrderId,
+  onFocusConsumed,
   currentUserId,
+  currentUserName,
+  tenantName,
   isTenantAdmin,
   canCreate,
 }: Props) {
@@ -202,11 +211,16 @@ export function WorkOrderAdmin({
   const [units, setUnits] = useState<Unit[]>([]);
   const [costCenters, setCostCenters] = useState<CostCenter[]>([]);
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
-  const [statusFilter, setStatusFilter] = useState<'all' | WorkOrderStatus>('all');
+  const [orderTab, setOrderTab] = useState<'corrective' | 'preventive'>('corrective');
+  const [tabFilters, setTabFilters] = useState<{
+    corrective: { status: 'all' | WorkOrderStatus; search: string };
+    preventive: { status: 'all' | WorkOrderStatus; search: string };
+  }>({ corrective: { status: 'all', search: '' }, preventive: { status: 'all', search: '' } });
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [editingOrder, setEditingOrder] = useState<WorkOrder | null>(null);
+  const [isLocalExecutionOpen, setIsLocalExecutionOpen] = useState(false);
   const [form, setForm] = useState(emptyForm);
   const [message, setMessage] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
@@ -318,8 +332,12 @@ export function WorkOrderAdmin({
     void loadData();
   }, [loadData]);
 
+  const statusFilter = tabFilters[orderTab].status;
+  const searchTerm = tabFilters[orderTab].search.trim().toLowerCase();
   const filteredOrders = orders.filter((order) =>
-    statusFilter === 'all' ? true : order.status === statusFilter,
+    (orderTab === 'preventive' ? order.type === 'preventive' : order.type !== 'preventive') &&
+    (statusFilter === 'all' || order.status === statusFilter) &&
+    `${order.order_number} ${order.title} ${order.asset_name ?? ''}`.toLowerCase().includes(searchTerm),
   );
 
   const isDetailView = isFormOpen && editingOrder !== null;
@@ -357,6 +375,7 @@ export function WorkOrderAdmin({
   );
 
   function openNewOrder() {
+    setIsLocalExecutionOpen(false);
     setMessage('');
     setErrorMessage('');
     setEditingOrder(null);
@@ -369,6 +388,8 @@ export function WorkOrderAdmin({
   }
 
   function openEditOrder(order: WorkOrder) {
+    setOrderTab(order.type === 'preventive' ? 'preventive' : 'corrective');
+    setIsLocalExecutionOpen(false);
     setMessage('');
     setErrorMessage('');
     setEditingOrder(order);
@@ -410,6 +431,17 @@ export function WorkOrderAdmin({
     setIsFormOpen(true);
   }
 
+  useEffect(() => {
+    if (!focusWorkOrderId || isLoading) return;
+    const targetOrder = orders.find((order) => order.id === focusWorkOrderId);
+    if (targetOrder) {
+      openEditOrder(targetOrder);
+    } else {
+      setErrorMessage('A OS solicitada não está na lista carregada. Atualize a lista para localizá-la.');
+    }
+    onFocusConsumed?.();
+  }, [focusWorkOrderId, isLoading, orders, onFocusConsumed]);
+
   function handleUnitChange(unitId: string) {
     const unit = units.find((item) => item.id === unitId);
 
@@ -423,6 +455,11 @@ export function WorkOrderAdmin({
 
   async function saveOrder(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+
+    if (form.type === 'preventive' && !editingOrder) {
+      setErrorMessage('Gere a OS preventiva pelo plano para preservar o ciclo e impedir duplicidade.');
+      return;
+    }
 
     if (form.title.trim().length < 3) {
       setErrorMessage('O título precisa ter pelo menos 3 caracteres.');
@@ -651,14 +688,27 @@ export function WorkOrderAdmin({
 
   return (
     <div>
+      {!isDetailView && <div className="preventive-order-tabs" role="tablist" aria-label="Tipos de ordem de serviço">
+        <button type="button" role="tab" aria-selected={orderTab === 'corrective'}
+          className={orderTab === 'corrective' ? 'active' : 'secondary'} onClick={() => setOrderTab('corrective')}>CORRETIVAS</button>
+        <button type="button" role="tab" aria-selected={orderTab === 'preventive'}
+          className={orderTab === 'preventive' ? 'active' : 'secondary'} onClick={() => setOrderTab('preventive')}>PREVENTIVAS</button>
+      </div>}
       {!isDetailView && (
       <div className="user-admin-actions">
         <div className="asset-search">
+          <input aria-label={`Buscar OS ${orderTab === 'preventive' ? 'preventivas' : 'corretivas'}`}
+            placeholder="Buscar número, título ou ativo..." value={tabFilters[orderTab].search}
+            onChange={(event) => setTabFilters((current) => ({ ...current,
+              [orderTab]: { ...current[orderTab], search: event.target.value },
+            }))} />
           <select
             className="status-filter"
             value={statusFilter}
             onChange={(event) =>
-              setStatusFilter(event.target.value as 'all' | WorkOrderStatus)
+              setTabFilters((current) => ({ ...current,
+                [orderTab]: { ...current[orderTab], status: event.target.value as 'all' | WorkOrderStatus },
+              }))
             }
           >
             <option value="all">Todos os status</option>
@@ -721,7 +771,16 @@ export function WorkOrderAdmin({
         </div>
       )}
 
-      {isFormOpen && (
+      {isFormOpen && isLocalExecutionOpen && editingOrder?.type === 'preventive' && (
+        <div className="content asset-admin">
+          <button type="button" className="secondary" onClick={() => setIsLocalExecutionOpen(false)}>Voltar à OS</button>
+          <PreventiveChecklistExecution workOrderId={editingOrder.id} tenantId={tenantId}
+            canEdit={editingOrder.status !== 'completed' && editingOrder.status !== 'cancelled'
+              && (isTenantAdmin || editingOrder.assigned_to === currentUserId)} />
+        </div>
+      )}
+
+      {isFormOpen && !isLocalExecutionOpen && (
         <form className="new-user-form panel" onSubmit={saveOrder}>
           <div className="panel-head">
             <div>
@@ -789,6 +848,11 @@ export function WorkOrderAdmin({
                   )}
                 </p>
               )}
+              {editingOrder.type === 'preventive' && (
+                <button type="button" className="secondary" onClick={() => setIsLocalExecutionOpen(true)}>
+                  Abrir checklist preventivo
+                </button>
+              )}
             </div>
           )}
 
@@ -811,7 +875,7 @@ export function WorkOrderAdmin({
                 }
               />
             </label>
-            {editingOrder && (
+            {editingOrder && editingOrder.type !== 'preventive' && (
               <>
                 <label className="field">
                   <span>Tipo de falha</span>
@@ -1040,11 +1104,14 @@ export function WorkOrderAdmin({
               <span>Tipo</span>
               <select
                 value={form.type}
+                disabled={editingOrder?.type === 'preventive'}
                 onChange={(event) =>
                   setForm({ ...form, type: event.target.value as WorkOrderType })
                 }
               >
-                {(Object.keys(typeLabels) as WorkOrderType[]).map((type) => (
+                {(Object.keys(typeLabels) as WorkOrderType[])
+                  .filter((type) => true)
+                  .map((type) => (
                   <option key={type} value={type}>
                     {typeLabels[type]}
                   </option>
@@ -1232,7 +1299,7 @@ export function WorkOrderAdmin({
           <div className="empty-state">
             {statusFilter !== 'all'
               ? `Nenhuma ordem com status "${statusLabels[statusFilter]}".`
-              : 'Nenhuma ordem de serviço cadastrada para este cliente.'}
+              : `Nenhuma OS ${orderTab === 'preventive' ? 'preventiva' : 'corretiva'} encontrada.`}
           </div>
         )}
 

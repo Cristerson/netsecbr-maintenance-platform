@@ -39,6 +39,7 @@ Este é o local oficial de trabalho. O código e a documentação são versionad
 | [Segurança](documentação/11-Seguranca.md) | Controles de segurança e privacidade. |
 | [Backlog](documentação/12-Backlog.md) | Épicos e histórias iniciais. |
 | [Roadmap](documentação/13-Roadmap.md) | Fases de evolução. |
+| [Diagnóstico Rápido MARV](DIAGNOSTICO_RAPIDO_MARV.md) | Status atual do produto, matriz de funcionalidades, riscos e próximos passos. |
 | [Padrões de Código](documentação/14-Padroes-de-Codigo.md) | Convenções de desenvolvimento. |
 | [Modelo Comercial](documentação/15-Modelo-Comercial.md) | Hipótese inicial de planos SaaS. |
 | [Administração SaaS e Cobrança](documentação/16-Administracao-SaaS-e-Cobranca.md) | Tenants, licenças, pagamentos e inadimplência. |

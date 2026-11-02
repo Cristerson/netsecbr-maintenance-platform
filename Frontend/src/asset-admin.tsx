@@ -6,7 +6,13 @@ import { AssetCategoryAdmin } from './asset-category-admin';
 type Props = {
   tenantId: string;
   canManage: boolean;
+  onOpenPlan?: (assetId: string, planId?: string) => void;
+  onOpenOrder?: (workOrderId: string) => void;
 };
+
+type AssetPlan = { id: string; name: string; periodicity_days: number; next_due_date: string; is_active: boolean };
+type AssetOrder = { id: string; order_number: number; title: string; type: string; status: string;
+  opened_at: string; assigned_profile: { full_name: string | null } | null };
 
 type AssetStatus = 'active' | 'inactive' | 'maintenance' | 'stopped' | 'retired';
 type Criticality = 'low' | 'medium' | 'high' | 'critical';
@@ -115,7 +121,7 @@ const operationalReadingSourceLabels = {
   iot: 'IoT',
 } as const;
 
-export function AssetAdmin({ tenantId, canManage }: Props) {
+export function AssetAdmin({ tenantId, canManage, onOpenPlan, onOpenOrder }: Props) {
   const [assets, setAssets] = useState<Asset[]>([]);
   const [categories, setCategories] = useState<AssetCategory[]>([]);
   const [units, setUnits] = useState<Unit[]>([]);
@@ -128,6 +134,9 @@ export function AssetAdmin({ tenantId, canManage }: Props) {
   const [editingAsset, setEditingAsset] = useState<Asset | null>(null);
   const [form, setForm] = useState(emptyForm);
   const [operationalReadings, setOperationalReadings] = useState<AssetOperationalReading[]>([]);
+  const [assetPlans, setAssetPlans] = useState<AssetPlan[]>([]);
+  const [assetOrders, setAssetOrders] = useState<AssetOrder[]>([]);
+  const [relatedError, setRelatedError] = useState('');
   const [readingForm, setReadingForm] = useState(emptyReadingForm);
   const [isReadingSaving, setIsReadingSaving] = useState(false);
   const [readingError, setReadingError] = useState('');
@@ -249,6 +258,9 @@ export function AssetAdmin({ tenantId, canManage }: Props) {
     setErrorMessage('');
     setEditingAsset(null);
     setOperationalReadings([]);
+    setAssetPlans([]);
+    setAssetOrders([]);
+    setRelatedError('');
     setReadingForm(emptyReadingForm);
     setReadingError('');
     setForm({
@@ -265,6 +277,9 @@ export function AssetAdmin({ tenantId, canManage }: Props) {
     setErrorMessage('');
     setEditingAsset(asset);
     setOperationalReadings([]);
+    setAssetPlans([]);
+    setAssetOrders([]);
+    setRelatedError('');
     setReadingForm(emptyReadingForm);
     setReadingError('');
     setForm({
@@ -282,7 +297,26 @@ export function AssetAdmin({ tenantId, canManage }: Props) {
       notes: asset.notes ?? '',
     });
     void loadOperationalReadings(asset.id);
+    void loadAssetRelations(asset.id);
     setIsFormOpen(true);
+  }
+
+  async function loadAssetRelations(assetId: string) {
+    const [plans, orders] = await Promise.all([
+      supabase.from('maintenance_plans').select('id,name,periodicity_days,next_due_date,is_active')
+        .eq('tenant_id', tenantId).eq('asset_id', assetId).order('next_due_date'),
+      supabase.from('work_orders')
+        .select('id,order_number,title,type,status,opened_at,assigned_profile:profiles!work_orders_assigned_to_fkey(full_name)')
+        .eq('tenant_id', tenantId).eq('asset_id', assetId)
+        .in('type', ['preventive', 'corrective']).order('opened_at', { ascending: false }).limit(100),
+    ]);
+    if (plans.error || orders.error) {
+      setRelatedError(`Não foi possível carregar planos ou histórico: ${plans.error?.message ?? orders.error?.message}`);
+      return;
+    }
+    setRelatedError('');
+    setAssetPlans((plans.data ?? []) as AssetPlan[]);
+    setAssetOrders((orders.data ?? []) as unknown as AssetOrder[]);
   }
 
   async function loadOperationalReadings(assetId: string) {
@@ -851,6 +885,29 @@ export function AssetAdmin({ tenantId, canManage }: Props) {
               </div>
             </section>
           )}
+
+          {editingAsset && <section className="asset-related-section" aria-label="Planos preventivos do ativo">
+            <div className="panel-head"><div><p className="eyebrow">PREVENÇÃO</p><h3>Planos preventivos</h3></div>
+              {canManage && <button type="button" className="secondary" onClick={() => onOpenPlan?.(editingAsset.id)}>Novo plano</button>}
+            </div>
+            {relatedError && <p className="error-message">{relatedError}</p>}
+            {assetPlans.length === 0 ? <p className="empty">Nenhum plano vinculado a este equipamento.</p> :
+              <div className="data-list">{assetPlans.map((plan) => <div className="data-row" key={plan.id}>
+                <div><strong>{plan.name}</strong><small>{plan.periodicity_days} dias · próxima execução {plan.next_due_date} · {plan.is_active ? 'Ativo' : 'Inativo'}</small></div>
+                <button type="button" className="secondary" onClick={() => onOpenPlan?.(editingAsset.id, plan.id)}>Abrir plano</button>
+              </div>)}</div>}
+          </section>}
+
+          {editingAsset && <section className="asset-related-section" aria-label="Histórico de ordens do ativo">
+            <div className="panel-head"><div><p className="eyebrow">RASTREABILIDADE</p><h3>Histórico de manutenção</h3></div></div>
+            {assetOrders.length === 0 ? <p className="empty">Nenhuma OS preventiva ou corretiva vinculada.</p> :
+              <div className="data-list">{assetOrders.map((order) => <div className="data-row" key={order.id}>
+                <div><strong>OS #{order.order_number} · {order.type === 'preventive' ? 'Preventiva' : 'Corretiva'} · {order.title}</strong>
+                  <small>{new Date(order.opened_at).toLocaleDateString('pt-BR')} · {order.status} · {order.assigned_profile?.full_name ?? 'Responsável não atribuído'}</small></div>
+                <button type="button" className="secondary" onClick={() => onOpenOrder?.(order.id)}>Abrir OS</button>
+              </div>)}</div>}
+            <p className="empty">Medições, fotos e relatórios permanecem vinculados ao detalhe de cada OS.</p>
+          </section>}
 
           <div className="form-actions">
             {editingAsset && (
