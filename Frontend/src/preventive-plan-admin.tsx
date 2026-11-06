@@ -29,6 +29,7 @@ type PreventivePlan = {
   created_at: string;
   updated_at: string;
   preventive_template_id: string | null;
+  checklist_revision: number;
 };
 
 type PreventivePlanRow = PreventivePlan & {
@@ -89,6 +90,14 @@ function formatRole(role: string) {
   };
 
   return roles[role] || role;
+}
+
+function safeDbError(error: unknown, fallback: string) {
+  const raw = error && typeof error === 'object' && 'message' in error
+    ? String((error as { message?: unknown }).message ?? '') : '';
+  const safe = raw.replace(/\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi, '[registro]')
+    .replace(/[\r\n]+/g, ' ').trim().slice(0, 240);
+  return safe ? `${fallback} ${safe}` : fallback;
 }
 
 // Data local (fuso do usuário) no formato YYYY-MM-DD, comparável com a coluna date.
@@ -154,13 +163,13 @@ export function PreventivePlanAdmin({ tenantId, canManage, focus, onFocusConsume
       { data: membershipData, error: membershipError },
     ] = await Promise.all([
       (async () => {
-        const fields = 'id, tenant_id, asset_id, name, periodicity_days, cycle_policy, next_due_date, assigned_to, is_active, notes, created_at, updated_at, assets(name, code)';
+        const baseFields = 'id, tenant_id, asset_id, name, periodicity_days, cycle_policy, next_due_date, assigned_to, is_active, notes, created_at, updated_at, assets(name, code)';
         const current = await supabase.from('maintenance_plans')
-          .select(`${fields}, preventive_template_id`).eq('tenant_id', tenantId).order('next_due_date');
+          .select(`${baseFields}, checklist_revision, preventive_template_id`).eq('tenant_id', tenantId).order('next_due_date');
         if (!current.error || current.error.code !== '42703') return current;
         const legacy = await supabase.from('maintenance_plans')
-          .select(fields).eq('tenant_id', tenantId).order('next_due_date');
-        return { ...legacy, data: legacy.data?.map((plan) => ({ ...plan, preventive_template_id: null })) ?? null };
+          .select(baseFields).eq('tenant_id', tenantId).order('next_due_date');
+        return { ...legacy, data: legacy.data?.map((plan) => ({ ...plan, preventive_template_id: null, checklist_revision: 1 })) ?? null };
       })(),
       supabase
         .from('assets')
@@ -361,6 +370,16 @@ export function PreventivePlanAdmin({ tenantId, canManage, focus, onFocusConsume
       return;
     }
 
+    if ((!editingPlan || checklistDirty) && form.activities.some((activity) => {
+      const hasParameter = Boolean(activity.measurement_parameter?.trim());
+      const hasUnit = Boolean(activity.measurement_unit?.trim());
+      const hasPoint = Boolean(activity.measurement_point?.trim());
+      return (hasParameter || hasUnit || hasPoint) && !(hasParameter && hasUnit && hasPoint);
+    })) {
+      setErrorMessage('Para registrar medições, informe parâmetro, unidade e ponto; deixe os três vazios quando não houver medição.');
+      return;
+    }
+
     setIsSaving(true);
     setMessage('');
     setErrorMessage('');
@@ -389,6 +408,9 @@ export function PreventivePlanAdmin({ tenantId, canManage, focus, onFocusConsume
         target_activities: form.activities.map((activity) => ({
           title: activity.title.trim(), instruction: activity.instruction.trim(),
           is_optional: activity.is_optional, requires_photo: activity.requires_photo,
+          measurement_parameter: activity.measurement_parameter?.trim() || null,
+          measurement_unit: activity.measurement_unit?.trim() || null,
+          measurement_point: activity.measurement_point?.trim() || null,
         })),
       });
       if (templateError) {
@@ -397,18 +419,24 @@ export function PreventivePlanAdmin({ tenantId, canManage, focus, onFocusConsume
         setIsSaving(false);
         return;
       }
+      const { data: planRevision, error: revisionError } = await supabase.from('maintenance_plans')
+        .select('checklist_revision').eq('id', savedPlan.id).single();
       const { data: verifiedActivities, error: verifyError } = await supabase
-        .from('preventive_plan_activities').select('position,title,instruction,is_optional,requires_photo')
-        .eq('tenant_id', tenantId).eq('plan_id', savedPlan.id).order('position');
-      const verified = !verifyError && savedCount === form.activities.length &&
+        .from('preventive_plan_activities').select('*')
+        .eq('tenant_id', tenantId).eq('plan_id', savedPlan.id)
+        .eq('revision_number', planRevision?.checklist_revision ?? -1).order('position');
+      const verified = !revisionError && !verifyError && savedCount === form.activities.length &&
         verifiedActivities?.length === form.activities.length &&
         verifiedActivities.every((activity, index) =>
           activity.position === index + 1 && activity.title === form.activities[index].title.trim() &&
           (activity.instruction ?? '') === form.activities[index].instruction.trim() &&
           activity.is_optional === form.activities[index].is_optional &&
-          activity.requires_photo === form.activities[index].requires_photo);
+           activity.requires_photo === form.activities[index].requires_photo &&
+           (activity.measurement_parameter ?? '') === (form.activities[index].measurement_parameter?.trim() ?? '') &&
+           (activity.measurement_unit ?? '') === (form.activities[index].measurement_unit?.trim() ?? '') &&
+           (activity.measurement_point ?? '') === (form.activities[index].measurement_point?.trim() ?? ''));
       if (!verified) {
-        setErrorMessage(`Plano salvo, mas não foi possível confirmar as atividades persistidas: ${verifyError?.message ?? 'contagem ou conteúdo divergente'}. Atualize e confira antes de gerar OS.`);
+        setErrorMessage(safeDbError(verifyError ?? revisionError, 'Plano salvo, mas não foi possível confirmar a revisão persistida. Atualize e confira antes de gerar OS.'));
         await loadData();
         setIsSaving(false);
         return;
@@ -474,9 +502,10 @@ export function PreventivePlanAdmin({ tenantId, canManage, focus, onFocusConsume
     if (!canManage || !plan.is_active) return;
 
     const { count, error: checklistError } = await supabase.from('preventive_plan_activities')
-      .select('id', { count: 'exact', head: true }).eq('tenant_id', tenantId).eq('plan_id', plan.id);
+      .select('id', { count: 'exact', head: true }).eq('tenant_id', tenantId).eq('plan_id', plan.id)
+      .eq('revision_number', plan.checklist_revision);
     if (checklistError || !count) {
-      setErrorMessage(checklistError?.message ?? 'Este plano ainda não possui atividades persistidas. Configure o checklist antes de gerar a OS.');
+      setErrorMessage(safeDbError(checklistError, 'Esta revisão do plano não possui atividades persistidas. Configure o checklist antes de gerar a OS.'));
       return;
     }
 
@@ -501,12 +530,17 @@ export function PreventivePlanAdmin({ tenantId, canManage, focus, onFocusConsume
     const generatedWorkOrder = (data?.[0] ?? null) as PreventiveWorkOrderResult | null;
 
     if (error || !generatedWorkOrder) {
-      // Falha na geração: a próxima execução exibida permanece como estava.
-      setErrorMessage(
-        `Não foi possível gerar a OS preventiva: ${
-          error?.message ?? 'Erro desconhecido'
-        }`,
-      );
+      const { data: activeOrders, error: activeOrderError } = await supabase.from('work_orders')
+        .select('id,order_number,status').eq('tenant_id', tenantId).eq('asset_id', plan.asset_id)
+        .eq('type', 'preventive').in('status', ['open', 'in_progress', 'waiting_material'])
+        .order('opened_at', { ascending: false }).limit(1);
+      if (!activeOrderError && activeOrders?.[0]) {
+        setLinkedOrderId(activeOrders[0].id);
+        setMessage(`Já existe a OS preventiva ativa #${activeOrders[0].order_number} para este ativo. Abra a OS existente.`);
+        setErrorMessage('Nenhuma OS duplicada foi criada. Resolva ou consulte a ordem ativa antes de tentar novamente.');
+      } else {
+        setErrorMessage(safeDbError(error ?? activeOrderError, 'Não foi possível gerar a OS preventiva. A próxima execução do plano foi mantida.'));
+      }
       setIsGeneratingWorkOrder(false);
       return;
     }
@@ -522,11 +556,16 @@ export function PreventivePlanAdmin({ tenantId, canManage, focus, onFocusConsume
     const { data: initializedCount, error: initError } = await supabase.rpc('initialize_preventive_checklist', {
       target_order_id: generatedWorkOrder.work_order_id,
     });
-    if (initError || !initializedCount) {
-      setErrorMessage(`OS #${generatedWorkOrder.order_number} gerada, mas o checklist não foi confirmado: ${initError?.message ?? 'nenhuma atividade inicializada'}. Abra a OS antes de prosseguir.`);
-      setLinkedOrderId(generatedWorkOrder.work_order_id);
-      setIsGeneratingWorkOrder(false);
+    const { count: persistedCount, error: confirmationError } = await supabase
+      .from('preventive_work_order_checklist_items').select('id', { count: 'exact', head: true })
+      .eq('tenant_id', tenantId).eq('work_order_id', generatedWorkOrder.work_order_id);
+    if (initError || !initializedCount || confirmationError || persistedCount !== initializedCount) {
+      const failure = safeDbError(initError ?? confirmationError, 'O banco não confirmou a inicialização integral do checklist.');
       await loadData();
+      setErrorMessage(`OS #${generatedWorkOrder.order_number} foi vinculada, mas o checklist não pôde ser confirmado: ${failure} Abra a OS e confira; não gere outra.`);
+      setLinkedOrderId(generatedWorkOrder.work_order_id);
+      setMessage('A OS já existe. Consulte-a para verificar o checklist antes de continuar.');
+      setIsGeneratingWorkOrder(false);
       return;
     }
     setIsGeneratingWorkOrder(false);
@@ -667,13 +706,6 @@ export function PreventivePlanAdmin({ tenantId, canManage, focus, onFocusConsume
             </div>
           )}
 
-          <PreventiveTemplateLibrary tenantId={tenantId} assetId={form.asset_id} planId={editingPlan?.id ?? null}
-            templateId={form.template_id} activities={form.activities}
-            onChange={(templateId, activities, changed) => {
-              setForm((current) => ({ ...current, template_id: templateId, activities }));
-              if (changed) setChecklistDirty(true);
-            }} />
-
           <div className="asset-form-grid">
             <label className="field">
               <span>Ativo *</span>
@@ -692,13 +724,13 @@ export function PreventivePlanAdmin({ tenantId, canManage, focus, onFocusConsume
             </label>
 
             <label className="field preventive-plan-activity-field">
-              <span>Atividade *</span>
+              <span>Nome do plano *</span>
               <input
                 required
                 minLength={3}
                 maxLength={180}
                 value={form.name}
-                placeholder="Ex.: Lubrificação dos redutores do eixo 3"
+                placeholder="Ex.: Preventiva anual do robô de solda"
                 onChange={(event) => setForm({ ...form, name: event.target.value })}
               />
             </label>
@@ -785,6 +817,13 @@ export function PreventivePlanAdmin({ tenantId, canManage, focus, onFocusConsume
             </label>
           </div>
 
+          <PreventiveTemplateLibrary tenantId={tenantId} assetId={form.asset_id} planId={editingPlan?.id ?? null}
+            templateId={form.template_id} activities={form.activities}
+            onChange={(templateId, activities, changed) => {
+              setForm((current) => ({ ...current, template_id: templateId, activities }));
+              if (changed) setChecklistDirty(true);
+            }} />
+
           <div className="form-actions">
             {editingPlan && editingPlan.is_active && (
               <button
@@ -837,7 +876,7 @@ export function PreventivePlanAdmin({ tenantId, canManage, focus, onFocusConsume
         <article className="panel table">
           <div className="table-head preventive-plan-table-head">
             <span>ATIVO</span>
-            <span>ATIVIDADE</span>
+            <span>PLANO</span>
             <span>PERIODICIDADE</span>
             <span>PRÓXIMA EXECUÇÃO</span>
             <span>RESPONSÁVEL</span>

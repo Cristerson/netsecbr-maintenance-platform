@@ -157,6 +157,7 @@ export function useCommandCenterData() {
   const [totals, setTotals] = useState<CommandCenterTotals>(emptyTotals);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
+  const [responseMs, setResponseMs] = useState<number | null>(null);
 
   // Recargas seguintes (botão "Atualizar dados") mantêm os dados atuais visíveis
   // até os novos chegarem. Sem polling e sem Realtime.
@@ -169,7 +170,9 @@ export function useCommandCenterData() {
       setIsLoading(true);
     }
 
+    const started = performance.now();
     const { data, error: rpcError } = await supabase.rpc('get_command_center_overview');
+    setResponseMs(Math.round(performance.now() - started));
 
     if (rpcError) {
       const denied = rpcError.message.includes('Acesso negado');
@@ -217,7 +220,7 @@ export function useCommandCenterData() {
     setIsLoading(false);
   }, []);
 
-  return { tenants, totals, isLoading, error, reload };
+  return { tenants, totals, isLoading, error, responseMs, reload };
 }
 
 export function useCommandCenterConsumption() {

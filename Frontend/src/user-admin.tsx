@@ -563,8 +563,8 @@ async function createUser(event: FormEvent<HTMLFormElement>) {
   let detail = error.message;
 
   if (error instanceof FunctionsHttpError) {
-    const responseBody = await error.context.json();
-    detail = responseBody.error ?? detail;
+    const responseBody = await error.context.json().catch(() => null);
+    detail = typeof responseBody?.error === 'string' ? responseBody.error : detail;
   }
 
   setErrorMessage(`Não foi possível cadastrar o usuário: ${detail}`);

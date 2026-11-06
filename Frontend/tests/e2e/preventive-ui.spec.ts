@@ -9,7 +9,9 @@ test('fluxo visual local: rascunho, devolução, aprovação, assinatura e PDF',
   await results.nth(0).selectOption('ok');
   await results.nth(1).selectOption('not_ok');
   await results.nth(2).selectOption('not_applicable');
-  await page.getByLabel('Medição (inclua valor e unidade)').nth(1).fill('42 °C');
+  await expect(page.getByLabel('Valor medido')).toHaveCount(0);
+  await expect(page.getByLabel('Temperatura (°C) · Ponto de teste QA')).toHaveCount(1);
+  await page.getByLabel('Temperatura (°C) · Ponto de teste QA').fill('42');
   await page.getByLabel('Não conformidade').fill('Temperatura acima do limite de teste.');
   await page.getByLabel('Descrição do serviço executado').fill('Inspeção de teste executada com leitura simulada e registro visual.');
 

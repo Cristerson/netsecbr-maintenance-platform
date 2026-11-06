@@ -14,6 +14,10 @@ function TestScreen() {
     workOrderId="11111111-1111-4111-8111-111111111111"
     tenantId="22222222-2222-4222-8222-222222222222"
     canEdit
+    tenantName="Cliente de teste"
+    order={{ number: 1, title: 'Preventiva de teste', openedAt: '2026-11-04T12:00:00Z',
+      completedAt: null, assetName: 'Ativo de teste', unitName: 'Unidade de teste',
+      assignedName: 'Técnico de teste', actionTaken: null, resolutionNotes: null }}
   />
   </main>;
 }

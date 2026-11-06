@@ -1,0 +1,141 @@
+.asset-plan-list {
+  display: grid;
+  gap: 10px;
+  margin: 14px 0 22px;
+}
+.asset-plan-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-width: 0;
+  padding: 14px 16px;
+  border: 1px solid #dce6f2;
+  border-radius: 10px;
+  background: #fff;
+}
+.asset-plan-card-main { min-width: 0; }
+.asset-plan-card-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.asset-plan-card h4 {
+  margin: 0;
+  color: #0a2445;
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+.asset-plan-card .badge { border-radius: 999px; padding: 4px 9px; font-size: 11px; font-weight: 700; }
+.asset-plan-card .badge.asset-plan-active { background: #ddf3e8; color: #17633e; }
+.asset-plan-card .badge.asset-plan-inactive { background: #eff1f4; color: #526070; }
+.asset-plan-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px 18px;
+  margin-top: 7px;
+  color: #667995;
+  font-size: 12px;
+}
+
+.asset-history-list {
+  display: grid;
+  gap: 14px;
+  margin: 16px 0;
+}
+
+.asset-history-card {
+  min-width: 0;
+  padding: 18px 20px;
+  border: 1px solid #dce6f2;
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 3px 12px rgb(12 38 78 / 4%);
+}
+
+.asset-history-card-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 7px;
+}
+
+.asset-history-number {
+  margin-right: 5px;
+  color: #092b58;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.asset-history-card h4 {
+  margin: 10px 0 15px;
+  overflow-wrap: anywhere;
+  color: #0a2445;
+  font-size: 16px;
+  line-height: 1.35;
+}
+
+.asset-history-card .badge {
+  border-radius: 999px;
+  padding: 4px 9px;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.asset-history-card .badge.asset-history-type-preventive { background: #e8f2ff; color: #125397; }
+.asset-history-card .badge.asset-history-type-corrective { background: #f4eafb; color: #743d99; }
+.asset-history-card .badge.asset-history-status-completed,
+.asset-history-card .badge.asset-history-status-closed { background: #ddf3e8; color: #17633e; }
+.asset-history-card .badge.asset-history-status-in_progress { background: #e6f1ff; color: #165aa0; }
+.asset-history-card .badge.asset-history-status-open,
+.asset-history-card .badge.asset-history-status-pending,
+.asset-history-card .badge.asset-history-status-waiting_material { background: #fff0d5; color: #89510e; }
+.asset-history-card .badge.asset-history-status-cancelled { background: #eff1f4; color: #526070; }
+
+.asset-history-facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(145px, 1fr));
+  gap: 12px 20px;
+  margin: 0;
+  padding: 13px 0;
+  border-top: 1px solid #e8edf5;
+  border-bottom: 1px solid #e8edf5;
+}
+
+.asset-history-facts div { min-width: 0; }
+.asset-history-facts dt {
+  margin-bottom: 4px;
+  color: #667995;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+.asset-history-facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: #102b4f;
+  font-size: 13px;
+}
+
+.asset-history-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+.asset-history-actions a.secondary {
+  display: inline-flex;
+  align-items: center;
+  text-decoration: none;
+}
+
+@media (max-width: 600px) {
+  .asset-plan-card { align-items: stretch; flex-direction: column; }
+  .asset-plan-card > button { width: 100%; }
+  .asset-history-card { padding: 14px; }
+  .asset-history-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .asset-history-actions > * { flex: 1 1 auto; justify-content: center; }
+}

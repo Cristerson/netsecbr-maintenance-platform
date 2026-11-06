@@ -1,5 +1,8 @@
 import { createClient } from 'npm:@supabase/supabase-js@2'
 
+// ID confirmado em auth.users no projeto oficial. Nunca usar e-mail como única proteção.
+const PROTECTED_OWNER_ID = 'e00995cb-bc07-4ccb-9834-7798ed7f9af9'
+
 const origins = (Deno.env.get('ALLOWED_ORIGINS') ?? 'http://localhost:5173,http://localhost:5174').split(',').map((value) => value.trim())
 const cors = (origin: string | null) => ({
   'Access-Control-Allow-Origin': origin && origins.includes(origin) ? origin : origins[0],
@@ -30,6 +33,44 @@ Deno.serve(async (request) => {
     const body = await request.json(), action = String(body.action ?? '')
     const audit = (event: string, id: string, metadata: Record<string, unknown>) => admin.from('audit_logs').insert({ tenant_id: null, actor_id: caller.id, action: event, resource_type: 'platform_user', resource_id: id, metadata })
 
+    if (action === 'tenant_access_overview') {
+      if (caller.id !== PROTECTED_OWNER_ID) return respond({ error: 'Acompanhamento de acessos restrito ao Super Admin.' }, 403, headers)
+      const tenantId = String(body.tenantId ?? '')
+      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(tenantId)) return respond({ error: 'Cliente inválido.' }, 400, headers)
+      const { data: tenant, error: tenantError } = await admin.from('tenants').select('id').eq('id', tenantId).maybeSingle()
+      if (tenantError || !tenant) return respond({ error: 'Cliente não encontrado.' }, 404, headers)
+      const { data: memberships, error: membershipError } = await admin.from('tenant_memberships')
+        .select('user_id, role, is_active, profiles!inner(full_name)')
+        .eq('tenant_id', tenantId).limit(1001)
+      if (membershipError) return respond({ error: 'Não foi possível consultar os usuários do cliente.' }, 500, headers)
+      if ((memberships ?? []).length > 1000) return respond({ error: 'Mais de 1.000 vínculos; consulta paginada necessária para evitar indicadores incompletos.' }, 409, headers)
+      const users: Record<string, unknown>[] = []
+      for (let offset = 0; offset < (memberships ?? []).length; offset += 10) {
+        const batch = (memberships ?? []).slice(offset, offset + 10)
+        users.push(...await Promise.all(batch.map(async (member: any) => {
+          const { data, error } = await admin.auth.admin.getUserById(member.user_id)
+          if (error || !data.user) throw new Error('auth_user_unavailable')
+          const profile = member.profiles as { full_name: string | null }
+          return {
+            userId: member.user_id,
+            fullName: profile.full_name ?? null,
+            email: data.user.email ?? null,
+            role: member.role,
+            isActive: member.is_active,
+            createdAt: data.user.created_at ?? null,
+            lastSignInAt: data.user.last_sign_in_at ?? null,
+          }
+        })))
+      }
+      return respond({ users, telemetry: {
+        lastSignInSource: 'auth.users.last_sign_in_at',
+        firstSignInAvailable: false,
+        loginHistoryAvailable: false,
+        loginCountsAvailable: false,
+        authFailuresAvailable: false,
+      } }, 200, headers)
+    }
+
     if (action === 'list') {
       const [{ data: roles, error: rolesError }, { data: authData, error: authError }] = await Promise.all([
         admin.from('platform_access_roles').select('user_id, role, is_active, created_at, profiles!inner(full_name, is_active)').order('created_at'),
@@ -40,6 +81,7 @@ Deno.serve(async (request) => {
       return respond({
         users: (roles ?? []).map((row: any) => ({
           id: row.user_id,
+          isProtectedOwner: row.user_id === PROTECTED_OWNER_ID,
           role: row.role,
           isActive: row.is_active && row.profiles.is_active,
           fullName: row.profiles.full_name ?? 'Nome não informado',
@@ -50,8 +92,10 @@ Deno.serve(async (request) => {
     }
 
     if (action === 'create') {
+      const { data: scopedReady, error: readinessError } = await admin.rpc('platform_scoped_provisioning_ready')
+      if (readinessError || scopedReady !== true) return respond({ error: 'Novos acessos da plataforma aguardam permissões granulares. Nenhum acesso global será concedido automaticamente.' }, 403, headers)
       const fullName = String(body.fullName ?? '').trim(), email = String(body.email ?? '').trim().toLowerCase(), role = String(body.role ?? 'operator'), initialPassword = String(body.password ?? '')
-      if (!fullName || !email.includes('@') || initialPassword.length < 12 || !['owner', 'operator'].includes(role)) return respond({ error: 'Informe nome, e-mail, senha de 12 caracteres e perfil válido.' }, 400, headers)
+      if (!fullName || !email.includes('@') || initialPassword.length < 12 || role !== 'operator') return respond({ error: 'Novos proprietários exigem autorização e fluxo específico. Cadastre somente administradores nesta interface.' }, 400, headers)
       const { data: created, error: createError } = await admin.auth.admin.createUser({ email, password: initialPassword, email_confirm: true, user_metadata: { full_name: fullName } })
       if (createError || !created.user) return respond({ error: createError?.message ?? 'Não foi possível criar o usuário.' }, 400, headers)
       const id = created.user.id
@@ -63,12 +107,18 @@ Deno.serve(async (request) => {
     }
 
     if (action === 'link_existing') {
+      const { data: scopedReady, error: readinessError } = await admin.rpc('platform_scoped_provisioning_ready')
+      if (readinessError || scopedReady !== true) return respond({ error: 'Vínculos novos aguardam permissões granulares. Nenhum acesso global será concedido automaticamente.' }, 403, headers)
       const email = String(body.email ?? '').trim().toLowerCase(), role = String(body.role ?? 'operator')
-      if (!email.includes('@') || !['owner', 'operator'].includes(role)) return respond({ error: 'Informe um e-mail existente e um perfil válido.' }, 400, headers)
+      if (!email.includes('@') || role !== 'operator') return respond({ error: 'Vincule somente administradores nesta interface. Novos proprietários exigem autorização específica.' }, 400, headers)
       const { data: authData, error: authError } = await admin.auth.admin.listUsers({ page: 1, perPage: 1000 })
       if (authError) return respond({ error: 'Não foi possível localizar o usuário informado.' }, 500, headers)
       const existingUser = (authData.users ?? []).find((user) => user.email?.toLowerCase() === email)
       if (!existingUser) return respond({ error: 'Não existe uma conta cadastrada com este e-mail. Use “Novo usuário da plataforma”.' }, 404, headers)
+      if (existingUser.id === PROTECTED_OWNER_ID) return respond({ error: 'A conta proprietária principal já possui acesso protegido.' }, 403, headers)
+      const { data: existingPlatformRole, error: existingRoleError } = await admin.from('platform_access_roles').select('role').eq('user_id', existingUser.id).maybeSingle()
+      if (existingRoleError) return respond({ error: 'Não foi possível validar o acesso atual desta conta.' }, 500, headers)
+      if (existingPlatformRole) return respond({ error: 'Esta conta já integra a equipe da plataforma. Edite seu cadastro existente.' }, 409, headers)
       const { data: profile, error: profileLookupError } = await admin.from('profiles').select('id, full_name, is_active').eq('id', existingUser.id).maybeSingle()
       if (profileLookupError || !profile) return respond({ error: 'A conta encontrada não possui um perfil válido no MARV.' }, 400, headers)
       if (!profile.is_active) return respond({ error: 'A conta encontrada está inativa e não pode receber acesso à plataforma.' }, 400, headers)
@@ -80,6 +130,7 @@ Deno.serve(async (request) => {
     }
 
     const userId = String(body.userId ?? '')
+    if (userId === PROTECTED_OWNER_ID) return respond({ error: 'A conta proprietária principal não pode ser alterada por esta interface.' }, 403, headers)
     if (!userId || userId === caller.id) return respond({ error: 'Você não pode alterar o próprio acesso neste painel.' }, 400, headers)
 
     if (action === 'update_identity') {
@@ -103,7 +154,9 @@ Deno.serve(async (request) => {
 
       const targetProfile = targetRole.profiles as unknown as { full_name: string | null; is_active: boolean; platform_role: string | null }
       const currentRole = targetRole.role
+      if (role === 'owner' && currentRole !== 'owner') return respond({ error: 'Promoção a proprietário exige autorização e fluxo específico.' }, 403, headers)
       const currentActive = targetRole.is_active && targetProfile.is_active
+      if (!currentActive && isActive) return respond({ error: 'Reativação administrativa aguardando permissões granulares para evitar acesso global automático.' }, 403, headers)
       const currentFullName = targetProfile.full_name ?? ''
       const currentEmail = targetAuthUser.user.email?.toLowerCase() ?? ''
 

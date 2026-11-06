@@ -4,6 +4,7 @@ import { supabase } from './supabase';
 
 type PlatformUser = {
   id: string;
+  isProtectedOwner?: boolean;
   fullName: string;
   email: string;
   role: 'owner' | 'operator';
@@ -16,6 +17,8 @@ type Props = { currentUserId: string; onBack: () => void };
 type NewUserForm = { fullName: string; email: string; password: string; role: PlatformUser['role'] };
 
 const emptyForm: NewUserForm = { fullName: '', email: '', password: '', role: 'operator' };
+const PROTECTED_OWNER_ID = 'e00995cb-bc07-4ccb-9834-7798ed7f9af9';
+const isProtectedOwner = (user: PlatformUser | null) => user?.id === PROTECTED_OWNER_ID || user?.isProtectedOwner === true;
 
 function roleLabel(role: PlatformUser['role']) {
   return role === 'owner' ? 'Proprietário' : 'Administrador';
@@ -120,6 +123,10 @@ export function PlatformTeamAdmin({ currentUserId, onBack }: Props) {
 
   const saveIdentity = async () => {
     if (!selectedUser) return;
+    if (isProtectedOwner(selectedUser)) {
+      setError('A conta proprietária principal não pode ser alterada por esta interface.');
+      return;
+    }
     if (selectedUser.id === currentUserId) {
       setError('Você não pode alterar o próprio acesso neste painel.');
       return;
@@ -185,6 +192,10 @@ export function PlatformTeamAdmin({ currentUserId, onBack }: Props) {
   const resetPassword = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!selectedUser) return;
+    if (isProtectedOwner(selectedUser)) {
+      setError('A senha da conta proprietária principal só pode ser alterada por recuperação ou troca voluntária.');
+      return;
+    }
     if (selectedUser.id === currentUserId) {
       setError('Você não pode redefinir a própria senha neste painel. Use a recuperação de acesso.');
       return;
@@ -224,6 +235,7 @@ export function PlatformTeamAdmin({ currentUserId, onBack }: Props) {
   };
 
   const isSelf = selectedUser?.id === currentUserId;
+  const isLocked = isSelf || isProtectedOwner(selectedUser);
   const hasChanges = Boolean(
     selectedUser &&
     (editFullName.trim() !== selectedUser.fullName ||
@@ -244,13 +256,14 @@ export function PlatformTeamAdmin({ currentUserId, onBack }: Props) {
 
       {!isNew && !selectedUser && (
         <>
-          <div className="user-admin-actions"><button className="primary button-with-icon" onClick={() => { clearFeedback(); setFormMode('new'); setForm({ ...emptyForm }); }}><UserPlus size={17} />Novo usuário da plataforma</button><button className="secondary button-with-icon" onClick={() => { clearFeedback(); setFormMode('existing'); setForm({ ...emptyForm }); }}><UserPlus size={17} />Vincular usuário existente</button></div>
+          <div className="user-admin-actions"><button className="primary button-with-icon" disabled title="Aguardando permissões granulares por cliente"><UserPlus size={17} />Novo usuário da plataforma</button><button className="secondary button-with-icon" disabled title="Aguardando permissões granulares por cliente"><UserPlus size={17} />Vincular usuário existente</button></div>
+          <p className="empty">Novos acessos da equipe NETSECBR estão temporariamente suspensos para evitar privilégios globais. O cadastro de usuários de clientes permanece disponível nas configurações de cada cliente.</p>
           <article className="panel table">
-            <div className="panel-head"><div><p className="eyebrow">ACESSOS GLOBAIS</p><h2>Proprietários e administradores</h2></div><button className="secondary" onClick={() => void loadUsers()}>Atualizar lista</button></div>
+            <div className="panel-head"><div><p className="eyebrow">USUÁRIOS DA PLATAFORMA</p><h2>Proprietários e administradores</h2></div><button className="secondary" onClick={() => void loadUsers()}>Atualizar lista</button></div>
             {isLoading ? <p className="empty">Carregando equipe...</p> : users.length === 0 ? <p className="empty">Nenhum usuário da plataforma encontrado.</p> : <>
               <div className="table-head" style={{ gridTemplateColumns: '1.6fr 1.5fr 1fr .8fr' }}><span>Nome</span><span>E-mail</span><span>Perfil</span><span>Situação</span></div>
               {users.map((user) => <div className={`table-row${user.isActive ? '' : ' is-inactive'}`} style={{ gridTemplateColumns: '1.6fr 1.5fr 1fr .8fr' }} key={user.id}>
-                <div><button className="work-order-link" onClick={() => openUserDetail(user)}>{user.fullName}</button></div><span>{user.email}</span><span>{roleLabel(user.role)}</span><span className={`badge ${user.isActive ? 'asset-status-active' : 'asset-status-inactive'}`}>{user.isActive ? 'Ativo' : 'Inativo'}</span>
+                <div><button className="work-order-link" onClick={() => openUserDetail(user)}>{user.fullName}</button></div><span>{user.email}</span><span>{isProtectedOwner(user) ? 'Proprietário da Plataforma — Super Admin' : roleLabel(user.role)}</span><span className={`badge ${user.isActive ? 'asset-status-active' : 'asset-status-inactive'}`}>{user.isActive ? 'Ativo' : 'Inativo'}</span>
               </div>)}
             </>}
           </article>
@@ -260,7 +273,8 @@ export function PlatformTeamAdmin({ currentUserId, onBack }: Props) {
       {isNew && form && <form className="new-user-form panel" onSubmit={(event) => void createUser(event)}>
         <div className="panel-head"><div><p className="eyebrow">{formMode === 'existing' ? 'VINCULAR ACESSO EXISTENTE' : 'NOVO ACESSO GLOBAL'}</p><h2>{formMode === 'existing' ? 'Vincular usuário à plataforma' : 'Cadastrar usuário da plataforma'}</h2></div></div>
         {formMode === 'existing' && <p className="empty">Use uma conta que já existe no MARV. O vínculo concede acesso global e fica registrado na auditoria.</p>}
-        <div className="form-grid">{formMode === 'new' && <label className="field"><span>Nome completo *</span><input value={form.fullName} onChange={(event) => setForm({ ...form, fullName: event.target.value })} disabled={isSaving} required /></label>}<label className="field"><span>E-mail *</span><input type="email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} disabled={isSaving} required /></label>{formMode === 'new' && <label className="field"><span>Senha inicial *</span><input type="password" value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} disabled={isSaving} minLength={12} required /></label>}<label className="field"><span>Perfil *</span><select value={form.role} onChange={(event) => setForm({ ...form, role: event.target.value as PlatformUser['role'] })} disabled={isSaving}><option value="operator">Administrador</option><option value="owner">Proprietário</option></select></label></div>
+        <div className="form-grid">{formMode === 'new' && <label className="field"><span>Nome completo *</span><input value={form.fullName} onChange={(event) => setForm({ ...form, fullName: event.target.value })} disabled={isSaving} required /></label>}<label className="field"><span>E-mail *</span><input type="email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} disabled={isSaving} required /></label>{formMode === 'new' && <label className="field"><span>Senha inicial *</span><input type="password" value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} disabled={isSaving} minLength={12} required /></label>}<label className="field"><span>Perfil *</span><select value="operator" disabled><option value="operator">Administrador</option></select></label></div>
+        <p className="empty">Novos proprietários exigem um procedimento específico. Este cadastro não concede novos acessos de Super Admin.</p>
         <div className="form-actions"><button type="submit" disabled={isSaving}>{isSaving ? 'Salvando...' : formMode === 'existing' ? 'Vincular usuário' : 'Cadastrar usuário'}</button><button type="button" className="secondary" onClick={closeDetail} disabled={isSaving}>Cancelar</button></div>
       </form>}
 
@@ -275,7 +289,9 @@ export function PlatformTeamAdmin({ currentUserId, onBack }: Props) {
 
           <div className="insight" style={{ marginBottom: 16 }}>
             <p>
-              <strong>Aviso de governança:</strong> no MARV, a exclusão de usuários é tratada exclusivamente por desativação para preservar integridade operacional, rastreabilidade e histórico de auditoria. Contas nunca são apagadas fisicamente.
+              {isProtectedOwner(selectedUser)
+                ? 'Esta é a conta proprietária principal do MARV. Por segurança, seus privilégios administrativos não podem ser removidos por esta interface.'
+                : 'No MARV, a exclusão de usuários é tratada exclusivamente por desativação para preservar integridade operacional, rastreabilidade e histórico de auditoria.'}
             </p>
           </div>
 
@@ -285,7 +301,7 @@ export function PlatformTeamAdmin({ currentUserId, onBack }: Props) {
               <input
                 type="text"
                 value={editFullName}
-                disabled={isSaving || isSelf}
+                disabled={isSaving || isLocked}
                 onChange={(event) => setEditFullName(event.target.value)}
                 required
               />
@@ -296,7 +312,7 @@ export function PlatformTeamAdmin({ currentUserId, onBack }: Props) {
               <input
                 type="email"
                 value={editEmail}
-                disabled={isSaving || isSelf}
+                disabled={isSaving || isLocked}
                 onChange={(event) => setEditEmail(event.target.value)}
                 required
               />
@@ -306,7 +322,7 @@ export function PlatformTeamAdmin({ currentUserId, onBack }: Props) {
               <span>Perfil *</span>
               <select
                 value={editRole}
-                disabled={isSaving || isSelf}
+                disabled={isSaving || isLocked}
                 onChange={(event) => setEditRole(event.target.value as PlatformUser['role'])}
               >
                 <option value="operator">Administrador</option>
@@ -318,7 +334,7 @@ export function PlatformTeamAdmin({ currentUserId, onBack }: Props) {
               <span>Situação *</span>
               <select
                 value={editActive ? 'active' : 'inactive'}
-                disabled={isSaving || isSelf}
+                disabled={isSaving || isLocked}
                 onChange={(event) => setEditActive(event.target.value === 'active')}
               >
                 <option value="active">Ativo</option>
@@ -335,16 +351,16 @@ export function PlatformTeamAdmin({ currentUserId, onBack }: Props) {
             </label>
           </div>
 
-          {isSelf && (
+          {isLocked && (
             <p className="empty">
-              Você não pode alterar o próprio acesso, próprio perfil, própria situação, próprio e-mail ou própria senha neste painel.
+              {isProtectedOwner(selectedUser) ? 'Conta proprietária protegida. Use a recuperação de acesso ou a troca voluntária de senha quando necessário.' : 'Você não pode alterar o próprio acesso ou a própria senha neste painel.'}
             </p>
           )}
 
           <div className="form-actions admin-record-actions" style={{ marginTop: 20 }}>
             <button
               type="button"
-              disabled={isSaving || isSelf || !hasChanges || !editFullName.trim() || !editEmail.trim()}
+              disabled={isSaving || isLocked || !hasChanges || !editFullName.trim() || !editEmail.trim()}
               onClick={() => void saveIdentity()}
             >
               {isSaving ? 'Salvando...' : 'Salvar alterações'}
@@ -353,7 +369,7 @@ export function PlatformTeamAdmin({ currentUserId, onBack }: Props) {
             <button
               type="button"
               className="secondary button-with-icon"
-              disabled={isSaving || isSelf || !editActive}
+              disabled={isSaving || isLocked || !editActive}
               onClick={() => {
                 if (isSelf) {
                   setError('Você não pode redefinir a própria senha neste painel.');

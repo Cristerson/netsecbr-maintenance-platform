@@ -6,6 +6,9 @@ export type PlanChecklistActivity = {
   instruction: string;
   is_optional: boolean;
   requires_photo: boolean;
+  measurement_parameter?: string;
+  measurement_unit?: string;
+  measurement_point?: string;
 };
 
 type TemplateActivity = PlanChecklistActivity & { position: number };
@@ -45,17 +48,24 @@ export function PreventiveTemplateLibrary({ tenantId, assetId, planId, templateI
   useEffect(() => {
     if (!planId) return;
     let active = true;
-    void supabase.from('preventive_plan_activities')
-      .select('title,instruction,is_optional,requires_photo')
-      .eq('plan_id', planId).order('position')
-      .then(({ data, error: loadError }) => {
-        if (!active) return;
-        if (loadError) { setError(`Não foi possível carregar o checklist do plano: ${loadError.message}`); return; }
-        onChange(templateId, ((data ?? []) as TemplateActivity[]).map((activity) => ({
+    void (async () => {
+      setError('');
+      const { data: plan, error: planError } = await supabase.from('maintenance_plans')
+        .select('checklist_revision').eq('id', planId).single();
+      if (!active) return;
+      if (planError) { setError('Não foi possível identificar a revisão vigente do plano. A migration de revisão precisa estar aplicada.'); return; }
+      const { data, error: loadError } = await supabase.from('preventive_plan_activities')
+        .select('*').eq('plan_id', planId).eq('revision_number', plan.checklist_revision).order('position');
+      if (!active) return;
+      if (loadError) { setError('Não foi possível carregar a revisão vigente do checklist.'); return; }
+      onChange(templateId, ((data ?? []) as TemplateActivity[]).map((activity) => ({
           title: activity.title, instruction: activity.instruction ?? '',
           is_optional: activity.is_optional, requires_photo: activity.requires_photo,
-        })), false);
-      });
+          measurement_parameter: activity.measurement_parameter ?? '',
+          measurement_unit: activity.measurement_unit ?? '',
+          measurement_point: activity.measurement_point ?? '',
+      })), false);
+    })();
     return () => { active = false; };
   }, [planId]);
 
@@ -72,9 +82,15 @@ export function PreventiveTemplateLibrary({ tenantId, assetId, planId, templateI
 
   async function copyFromPlan() {
     if (!sourcePlanId) return;
+    const { data: sourcePlan, error: sourcePlanError } = await supabase.from('maintenance_plans')
+      .select('checklist_revision').eq('id', sourcePlanId).single();
+    if (sourcePlanError || !sourcePlan) {
+      setError('Não foi possível identificar a revisão vigente do plano de origem.');
+      return;
+    }
     const { data, error: copyError } = await supabase.from('preventive_plan_activities')
-      .select('title,instruction,is_optional,requires_photo')
-      .eq('plan_id', sourcePlanId).order('position');
+      .select('*')
+      .eq('plan_id', sourcePlanId).eq('revision_number', sourcePlan.checklist_revision).order('position');
     if (copyError || !data?.length) {
       setError(copyError?.message ?? 'Este plano não possui atividades estruturadas para copiar.');
       return;
@@ -83,6 +99,9 @@ export function PreventiveTemplateLibrary({ tenantId, assetId, planId, templateI
     onChange('', data.map((activity) => ({
       title: activity.title, instruction: activity.instruction ?? '',
       is_optional: activity.is_optional, requires_photo: activity.requires_photo,
+      measurement_parameter: activity.measurement_parameter ?? '',
+      measurement_unit: activity.measurement_unit ?? '',
+      measurement_point: activity.measurement_point ?? '',
     })), true);
   }
 
@@ -137,6 +156,17 @@ export function PreventiveTemplateLibrary({ tenantId, assetId, planId, templateI
           <label><input type="checkbox" checked={activity.requires_photo}
             onChange={(event) => updateActivity(index, { requires_photo: event.target.checked })} /> Foto prevista</label>
         </div>
+        <details>
+          <summary>Medição nesta atividade (opcional)</summary>
+          <div className="preventive-measurement-config">
+            <label className="field"><span>Parâmetro</span><input value={activity.measurement_parameter ?? ''} maxLength={120}
+              placeholder="Ex.: tensão de carga" onChange={(event) => updateActivity(index, { measurement_parameter: event.target.value })} /></label>
+            <label className="field"><span>Unidade</span><input value={activity.measurement_unit ?? ''} maxLength={40}
+              placeholder="Ex.: V, °C, h" onChange={(event) => updateActivity(index, { measurement_unit: event.target.value })} /></label>
+            <label className="field"><span>Ponto</span><input value={activity.measurement_point ?? ''} maxLength={160}
+              placeholder="Ex.: controlador" onChange={(event) => updateActivity(index, { measurement_point: event.target.value })} /></label>
+          </div>
+        </details>
       </div>)}
       <button type="button" className="secondary" onClick={() => onChange(templateId,
         [...activities, { title: '', instruction: '', is_optional: false, requires_photo: false }], true)}>

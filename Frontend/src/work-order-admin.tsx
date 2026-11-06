@@ -9,6 +9,8 @@ import {
 } from 'lucide-react';
 import { supabase } from './supabase';
 import { PreventiveChecklistExecution } from './preventive-checklist-execution';
+import { PreventiveReportWorkflow } from './preventive-report-workflow';
+import { workOrderDisplayTitle } from './work-order-label';
 
 type Props = {
   tenantId: string;
@@ -42,6 +44,8 @@ type WorkOrder = {
   opened_at: string;
   scheduled_for: string | null;
   completed_at: string | null;
+  preventive_cycle_key: string | null;
+  preventive_acceptance_required: boolean;
   diagnosis: string | null;
   root_cause: string | null;
   action_taken: string | null;
@@ -219,7 +223,7 @@ export function WorkOrderAdmin({
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [isFormOpen, setIsFormOpen] = useState(false);
-  const [editingOrder, setEditingOrder] = useState<WorkOrder | null>(null);
+  const [editingOrder, setEditingOrder] = useState<WorkOrderRow | null>(null);
   const [isLocalExecutionOpen, setIsLocalExecutionOpen] = useState(false);
   const [form, setForm] = useState(emptyForm);
   const [message, setMessage] = useState('');
@@ -232,7 +236,7 @@ export function WorkOrderAdmin({
     const { data: ordersData, error: ordersError } = await supabase
       .from('work_orders')
       .select(
-        `id, order_number, tenant_id, unit_id, cost_center_id, asset_id, title, description, type, priority, status, opened_by, assigned_to, opened_at, scheduled_for, completed_at, diagnosis, root_cause, action_taken, resolution_notes, causes_equipment_downtime, downtime_started_at, downtime_ended_at, diagnosis_category, root_cause_category, action_category, recommendation_category, reopened_at, reopened_by, reopen_reason, cancelled_at, cancelled_by, cancellation_reason, service_cost_cents, material_cost_cents, total_cost_cents, estimated_service_cost_cents, estimated_material_cost_cents, estimated_total_cost_cents,
+        `id, order_number, tenant_id, unit_id, cost_center_id, asset_id, title, description, type, priority, status, opened_by, assigned_to, opened_at, scheduled_for, completed_at, preventive_cycle_key, diagnosis, root_cause, action_taken, resolution_notes, causes_equipment_downtime, downtime_started_at, downtime_ended_at, diagnosis_category, root_cause_category, action_category, recommendation_category, reopened_at, reopened_by, reopen_reason, cancelled_at, cancelled_by, cancellation_reason, service_cost_cents, material_cost_cents, total_cost_cents, estimated_service_cost_cents, estimated_material_cost_cents, estimated_total_cost_cents,
         assets(name),
         units(name),
         cost_centers(name),
@@ -318,6 +322,7 @@ export function WorkOrderAdmin({
     setOrders(
       (ordersData ?? []).map((order: any) => ({
         ...order,
+        preventive_acceptance_required: order.preventive_acceptance_required ?? false,
         asset_name: order.assets?.name ?? null,
         unit_name: order.units?.name ?? '—',
         cost_center_name: order.cost_centers?.name ?? '—',
@@ -332,6 +337,20 @@ export function WorkOrderAdmin({
     void loadData();
   }, [loadData]);
 
+  async function refreshAfterPreventiveCompletion(orderId: string) {
+    await loadData();
+    const { data, error } = await supabase.from('work_orders')
+      .select('status,completed_at').eq('tenant_id', tenantId).eq('id', orderId).single();
+    if (error || !data) {
+      setErrorMessage('A OS foi concluída no servidor, mas a tela não conseguiu atualizar os dados. Atualize a lista antes de continuar.');
+      return;
+    }
+    setEditingOrder((current) => current?.id === orderId
+      ? { ...current, status: data.status as WorkOrderStatus, completed_at: data.completed_at }
+      : current);
+    setForm((current) => ({ ...current, status: data.status as WorkOrderStatus }));
+  }
+
   const statusFilter = tabFilters[orderTab].status;
   const searchTerm = tabFilters[orderTab].search.trim().toLowerCase();
   const filteredOrders = orders.filter((order) =>
@@ -341,9 +360,10 @@ export function WorkOrderAdmin({
   );
 
   const isDetailView = isFormOpen && editingOrder !== null;
-  // Detalhe de OS existente é somente leitura para quem não administra o cliente.
-  // A criação de nova OS permanece disponível conforme canCreate.
-  const isReadOnlyDetail = editingOrder !== null && !isTenantAdmin;
+  // Preventiva histórica sem chave de ciclo é preservada como consulta; a criação de OS permanece conforme canCreate.
+  const isReadOnlyDetail = editingOrder !== null && (
+    !isTenantAdmin || (editingOrder.type === 'preventive' && !editingOrder.preventive_cycle_key)
+  );
 
   const formCostTotal =
     (Number.isFinite(Number(form.service_cost)) ? Number(form.service_cost) : 0) +
@@ -387,7 +407,7 @@ export function WorkOrderAdmin({
     setIsFormOpen(true);
   }
 
-  function openEditOrder(order: WorkOrder) {
+  function openEditOrder(order: WorkOrderRow) {
     setOrderTab(order.type === 'preventive' ? 'preventive' : 'corrective');
     setIsLocalExecutionOpen(false);
     setMessage('');
@@ -502,8 +522,14 @@ export function WorkOrderAdmin({
       form.status === 'completed' &&
       editingOrder.status !== 'completed';
 
+    if (isBeingCompleted && editingOrder.type === 'preventive') {
+      setErrorMessage('A preventiva não pode ser concluída pelo formulário geral. Registre o checklist e aguarde o fluxo de revisão e aceite do relatório.');
+      return;
+    }
+
     if (
       isBeingCompleted &&
+      editingOrder.type !== 'preventive' &&
       (!form.diagnosis_category ||
         !form.root_cause_category ||
         !form.action_category ||
@@ -517,6 +543,7 @@ export function WorkOrderAdmin({
 
     if (
       isBeingCompleted &&
+      editingOrder.type !== 'preventive' &&
       form.causes_equipment_downtime &&
       !form.downtime_ended_at &&
       form.recommendation_category !== 'Condenado / perda total'
@@ -775,7 +802,13 @@ export function WorkOrderAdmin({
         <div className="content asset-admin">
           <button type="button" className="secondary" onClick={() => setIsLocalExecutionOpen(false)}>Voltar à OS</button>
           <PreventiveChecklistExecution workOrderId={editingOrder.id} tenantId={tenantId}
+            tenantName={tenantName} order={{ number: editingOrder.order_number, title: editingOrder.title,
+              openedAt: editingOrder.opened_at, completedAt: editingOrder.completed_at,
+              assetName: editingOrder.asset_name, unitName: editingOrder.unit_name,
+              assignedName: editingOrder.assigned_name,
+              actionTaken: editingOrder.action_taken, resolutionNotes: editingOrder.resolution_notes }}
             canEdit={editingOrder.status !== 'completed' && editingOrder.status !== 'cancelled'
+              && Boolean(editingOrder.preventive_cycle_key)
               && (isTenantAdmin || editingOrder.assigned_to === currentUserId)} />
         </div>
       )}
@@ -854,6 +887,22 @@ export function WorkOrderAdmin({
                 </button>
               )}
             </div>
+          )}
+
+          {editingOrder?.type === 'preventive' && (
+            <PreventiveReportWorkflow
+              workOrderId={editingOrder.id}
+              tenantId={tenantId}
+              orderNumber={editingOrder.order_number}
+              orderStatus={editingOrder.status}
+              hasVerifiedCycle={Boolean(editingOrder.preventive_cycle_key)}
+              acceptanceRequiredDefault={editingOrder.preventive_acceptance_required}
+              canEdit={Boolean(editingOrder.preventive_cycle_key) && !isReadOnlyDetail
+                && editingOrder.status !== 'completed' && editingOrder.status !== 'cancelled'
+                && (isTenantAdmin || editingOrder.assigned_to === currentUserId)}
+              isSupervisor={isTenantAdmin}
+              onCompleted={() => refreshAfterPreventiveCompletion(editingOrder.id)}
+            />
           )}
 
           <fieldset
@@ -1237,7 +1286,7 @@ export function WorkOrderAdmin({
                 >
                   {(Object.keys(statusLabels) as WorkOrderStatus[]).map(
                     (status) => (
-                      <option key={status} value={status}>
+                      <option key={status} value={status} disabled={editingOrder.type === 'preventive' && status === 'completed' && editingOrder.status !== 'completed'}>
                         {statusLabels[status]}
                       </option>
                     ),
@@ -1312,7 +1361,7 @@ export function WorkOrderAdmin({
                   className="work-order-link"
                   onClick={() => openEditOrder(order)}
                 >
-                  #{order.order_number} · {order.title}
+                  #{order.order_number} · {workOrderDisplayTitle(order.title, order.type)}
                 </button>
                 <small>
                   {order.opened_by_name

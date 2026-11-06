@@ -123,6 +123,7 @@ export function ServiceRequestAdmin({
   const [units, setUnits] = useState<Unit[]>([]);
   const [costCenters, setCostCenters] = useState<CostCenter[]>([]);
   const [statusFilter, setStatusFilter] = useState<'all' | ServiceRequestStatus>('all');
+  const [requestPage, setRequestPage] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [preventiveConflict, setPreventiveConflict] = useState<any>(null);
@@ -150,19 +151,22 @@ export function ServiceRequestAdmin({
       { data: costCenterData, error: costCenterError },
       { data: assetData, error: assetError },
     ] = await Promise.all([
-      supabase
-        .from('service_requests')
-        .select(
-        `id, request_number, tenant_id, unit_id, cost_center_id, asset_id, title, description, category, maintenance_type, priority, status, requested_by, requested_at, converted_to_work_order_id, triage_notes, estimated_service_cost_cents, estimated_material_cost_cents, estimated_total_cost_cents, triaged_at, triaged_by, approved_at, approved_by,
-        assets(name),
-        units(name),
-        cost_centers(name),
-        requested_profile:profiles!service_requests_requested_by_fkey(full_name),
-        converted_wo:work_orders!service_requests_converted_to_work_order_id_fkey(order_number)`,
-        )
-        .eq('tenant_id', tenantId)
-        .order('requested_at', { ascending: false })
-        .limit(200),
+      (async () => {
+        const all: unknown[] = [];
+        for (let offset = 0; ; offset += 200) {
+          const page = await supabase.from('service_requests').select(
+            `id, request_number, tenant_id, unit_id, cost_center_id, asset_id, title, description, category, maintenance_type, priority, status, requested_by, requested_at, converted_to_work_order_id, triage_notes, estimated_service_cost_cents, estimated_material_cost_cents, estimated_total_cost_cents, triaged_at, triaged_by, approved_at, approved_by,
+            assets(name), units(name), cost_centers(name),
+            requested_profile:profiles!service_requests_requested_by_fkey(full_name),
+            converted_wo:work_orders!service_requests_converted_to_work_order_id_fkey(order_number)`,
+          ).eq('tenant_id', tenantId).order('requested_at', { ascending: false })
+            .order('id').range(offset, offset + 199);
+          if (page.error) return { data: null, error: page.error };
+          all.push(...(page.data ?? []));
+          if ((page.data?.length ?? 0) < 200) break;
+        }
+        return { data: all, error: null };
+      })(),
       supabase
         .from('units')
         .select('id, cost_center_id, code, name, is_active')
@@ -221,6 +225,11 @@ export function ServiceRequestAdmin({
   const filteredRequests = requests.filter((request) =>
     statusFilter === 'all' ? true : request.status === statusFilter,
   );
+  const orderedRequests = statusFilter === 'converted_to_wo'
+    ? [...filteredRequests].sort((a, b) => (b.approved_at ?? b.requested_at).localeCompare(a.approved_at ?? a.requested_at)).slice(0, 10)
+    : filteredRequests;
+  const visibleRequests = orderedRequests.slice(requestPage * 50, (requestPage + 1) * 50);
+  useEffect(() => { setRequestPage(0); }, [statusFilter]);
 
   const estimatedTotal =
     (Number.isFinite(Number(form.estimated_service_cost))
@@ -510,60 +519,53 @@ export function ServiceRequestAdmin({
     if (request.maintenance_type === 'preventive' && request.asset_id) {
       const { data: plans, error: planError } = await supabase
         .from('maintenance_plans')
-        .select('id, next_due_date, is_active')
+        .select('id, next_due_date, is_active, checklist_revision')
         .eq('tenant_id', tenantId)
         .eq('asset_id', request.asset_id)
         .eq('is_active', true).eq('id', selectedPlanId!);
       if (planError || !plans?.length) {
-        setErrorMessage('Não há plano preventivo ativo para este ativo. Abra Preventivas para configurar o plano antes de aprovar.');
+        setErrorMessage('Não há plano preventivo ativo disponível para este ativo. Abra Preventivas para conferir a configuração.');
         setIsSaving(false);
         return;
       }
       const plan = plans[0];
       const { count: activityCount, error: activityError } = await supabase.from('preventive_plan_activities')
-        .select('id', { head: true, count: 'exact' }).eq('tenant_id', tenantId).eq('plan_id', plan.id);
+        .select('id', { head: true, count: 'exact' }).eq('tenant_id', tenantId).eq('plan_id', plan.id)
+        .eq('revision_number', plan.checklist_revision);
       if (activityError || !activityCount) {
-        setErrorMessage(activityError?.message ?? 'O plano selecionado não possui atividades persistidas. Configure o checklist antes de aprovar.');
+        setErrorMessage('A revisão vigente do plano não possui atividades persistidas. Configure o checklist antes de aprovar.');
         setIsSaving(false);
         return;
       }
-      const { data, error } = await supabase.rpc('create_preventive_cycle_work_order', {
+      const { data, error: approvalError } = await supabase.rpc('approve_preventive_service_request', {
+        target_request_id: request.id,
         target_plan_id: plan.id,
-        target_original_due_date: plan.next_due_date,
       });
       const rpcOrder = Array.isArray(data) ? data[0] : data;
       const newOrder = rpcOrder ? { id: rpcOrder.work_order_id, order_number: rpcOrder.order_number } : null;
-      if (error || !newOrder) {
-        const { data: blocking } = await supabase.from('work_orders')
+      if (approvalError || !newOrder) {
+        const { data: blocking, error: blockingError } = await supabase.from('work_orders')
           .select('id, order_number, status, scheduled_for, preventive_cycle_key, asset_id, assets(name)')
           .eq('tenant_id', tenantId).eq('asset_id', request.asset_id).eq('type', 'preventive')
-          .not('status', 'in', '("completed","cancelled")');
-        setPreventiveConflict({ request, blocking: blocking ?? [], message: error?.message ?? 'Conflito de ciclo preventivo.' });
-        setErrorMessage('Conflito de ciclo preventivo. Veja o painel abaixo.');
+          .in('status', ['open', 'in_progress', 'waiting_material']);
+        if (!blockingError && blocking?.length) {
+          setPreventiveConflict({ request, blocking, message: 'Já existe uma OS preventiva ativa para este ativo.' });
+          setErrorMessage('Nenhuma OS duplicada foi criada. Consulte a ordem ativa antes de tentar novamente.');
+        } else {
+          setErrorMessage('A aprovação preventiva não foi concluída. Nenhuma OS ou vínculo parcial foi confirmado; atualize a solicitação e tente novamente.');
+        }
         setIsSaving(false);
         return;
       }
-      const { data: linkedRequest, error: linkError } = await supabase.from('service_requests').update({
-        status: 'converted_to_wo',
-        converted_to_work_order_id: newOrder.id,
-        approved_at: new Date().toISOString(),
-        approved_by: currentUserId,
-      }).eq('id', request.id).select('id').maybeSingle();
-      if (linkError || !linkedRequest) {
-        setErrorMessage(`OS preventiva #${newOrder.order_number} criada, mas a solicitação não foi vinculada: ${linkError?.message ?? 'atualização não confirmada'}. Não tente gerar outra OS; confira a OS existente.`);
-        setIsSaving(false);
-        return;
-      }
-      const { data: initializedCount, error: initError } = await supabase.rpc('initialize_preventive_checklist', {
-        target_order_id: newOrder.id,
-      });
+      const { count: initializedCount, error: initError } = await supabase.from('preventive_work_order_checklist_items')
+        .select('id', { count: 'exact', head: true }).eq('tenant_id', tenantId).eq('work_order_id', newOrder.id);
       setEditingRequest({ ...request, status: 'converted_to_wo', converted_to_work_order_id: newOrder.id, converted_wo_number: newOrder.order_number, approved_at: new Date().toISOString(), approved_by: currentUserId });
       setForm((current) => ({ ...current, status: 'converted_to_wo' }));
       setPendingPreventiveRequest(null);
-      if (initError || !initializedCount) setErrorMessage(`OS #${newOrder.order_number} vinculada, mas o checklist não foi inicializado: ${initError?.message ?? 'nenhuma atividade criada'}. Abra a OS para conferir.`);
-      else setMessage(`Solicitação #${request.request_number} aprovada, OS preventiva #${newOrder.order_number} vinculada e ${initializedCount} atividades inicializadas.`);
-      setIsSaving(false);
       await loadData();
+      if (initError || !initializedCount) setErrorMessage(`Solicitação aprovada e OS #${newOrder.order_number} vinculada, mas a leitura do checklist não foi confirmada. Abra a OS antes de continuar; não gere outra.`);
+      else setMessage(`Solicitação #${request.request_number} aprovada e OS preventiva #${newOrder.order_number} vinculada com ${initializedCount} atividades confirmadas.`);
+      setIsSaving(false);
       return;
     }
 
@@ -613,7 +615,7 @@ export function ServiceRequestAdmin({
         {(preventiveConflict.blocking ?? []).map((wo: any) => (
           <div key={wo.id} className="panel" style={{ marginTop: 8 }}>
             <p>OS #{wo.order_number} · {wo.assets?.name ?? 'Ativo'} · Status: {wo.status} · Data: {wo.scheduled_for}</p>
-            <p>Ciclo: {wo.preventive_cycle_key ?? 'histórica sem ciclo comprovado'}</p>
+            <p>Ciclo: {wo.preventive_cycle_key ? 'comprovado' : 'histórico sem ciclo comprovado'}.</p>
             <button type="button" className="secondary" onClick={() => { setPreventiveConflict(null); onOpenOrders(); }}>Abrir OS existente</button>
           </div>
         ))}
@@ -675,6 +677,18 @@ export function ServiceRequestAdmin({
         >
           <RefreshCw size={17} />
           Atualizar lista
+        </button>
+      </div>}
+
+      {!isDetailView && <div className="request-queue-switch" aria-label="Filas de solicitações">
+        <button type="button" className={statusFilter === 'open' ? 'primary' : 'secondary'} onClick={() => setStatusFilter('open')}>
+          Solicitações abertas · {requests.filter((item) => item.status === 'open').length}
+        </button>
+        <button type="button" className={statusFilter === 'triaged' ? 'primary' : 'secondary'} onClick={() => setStatusFilter('triaged')}>
+          Pendentes de aprovação · {requests.filter((item) => item.status === 'triaged').length}
+        </button>
+        <button type="button" className={statusFilter === 'converted_to_wo' ? 'primary' : 'secondary'} onClick={() => setStatusFilter('converted_to_wo')}>
+          Últimas aprovadas · 10 mais recentes
         </button>
       </div>}
 
@@ -1030,7 +1044,7 @@ export function ServiceRequestAdmin({
         )}
 
         {!isLoading &&
-          filteredRequests.map((request) => (
+          visibleRequests.map((request) => (
             <div className="table-row request-table-row" key={request.id}>
               <div>
                 <button
@@ -1104,6 +1118,11 @@ export function ServiceRequestAdmin({
             </div>
           ))}
       </article>}
+      {!isDetailView && orderedRequests.length > 50 && <div className="request-pagination">
+        <button type="button" className="secondary" disabled={requestPage === 0} onClick={() => setRequestPage((page) => page - 1)}>Anterior</button>
+        <span>Página {requestPage + 1} de {Math.ceil(orderedRequests.length / 50)}</span>
+        <button type="button" className="secondary" disabled={(requestPage + 1) * 50 >= orderedRequests.length} onClick={() => setRequestPage((page) => page + 1)}>Próxima</button>
+      </div>}
     </div>
   );
 }

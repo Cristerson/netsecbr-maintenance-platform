@@ -1,4 +1,4 @@
-import { FormEvent, ReactNode, useEffect, useState } from 'react';
+import { FormEvent, ReactNode, useEffect, useRef, useState } from 'react';
 import type { Session } from '@supabase/supabase-js';
 import { Eye, EyeOff } from 'lucide-react';
 import { supabase } from './supabase';
@@ -17,7 +17,7 @@ export type CurrentAccount = {
 };
 
 
-type ProfileRow = {full_name: string | null;platform_role: 'netsecbr_admin' | 'netsecbr_support' | 'tenant_user';must_change_password: boolean;
+type ProfileRow = {full_name: string | null;platform_role: 'netsecbr_admin' | 'netsecbr_support' | 'tenant_user';must_change_password: boolean;is_active: boolean;
 };
 type MembershipRow = { id: string; tenant_id: string; role: 'tenant_admin' | 'navigation'; tenants: { trade_name: string | null } | { trade_name: string | null }[] | null };
 
@@ -33,17 +33,27 @@ export function AuthGate({ children }: { children: (account: CurrentAccount) => 
   const [mode, setMode] = useState<'sign-in' | 'forgot-password' | 'update-password'>('sign-in');
   const [newPassword, setNewPassword] = useState('');
   const [passwordConfirmation, setPasswordConfirmation] = useState('');
+  const sessionUserId = useRef<string | null>(null);
 
   useEffect(() => {
     const loadSession = async () => {
       const { data } = await supabase.auth.getSession();
+      sessionUserId.current = data.session?.user.id ?? null;
       setSession(data.session);
       setIsChecking(false);
     };
 
     void loadSession();
     const { data: listener } = supabase.auth.onAuthStateChange((event, nextSession) => {
-      setSession(nextSession);
+      const nextUserId = nextSession?.user.id ?? null;
+      if (sessionUserId.current !== nextUserId) {
+        sessionUserId.current = nextUserId;
+        setAccount(null);
+        setIsChecking(true);
+      }
+      // A renovação do token não muda a identidade do usuário. Preservar a
+      // sessão em estado evita desmontar todas as telas e rascunhos abertos.
+      setSession((current) => current?.user.id === nextSession?.user.id ? current : nextSession);
       if (event === 'PASSWORD_RECOVERY') {
         setMode('update-password');
         setIsChecking(false);
@@ -59,18 +69,18 @@ export function AuthGate({ children }: { children: (account: CurrentAccount) => 
     }
 
     const loadAccount = async () => {
-      setIsChecking(true);
-      const [{ data: profile, error: profileError }, { data: memberships, error: membershipError }] = await Promise.all([
-       supabase
-  .from('profiles')
-  .select('full_name, platform_role, must_change_password')
-  .eq('id', session.user.id)
-  .single(),
-        supabase.from('tenant_memberships').select('id,tenant_id, role, tenants(trade_name)').eq('user_id', session.user.id).eq('is_active', true).limit(1),
-      ]);
-
-      if (profileError || membershipError || !profile) {
+      if (!account) setIsChecking(true);
+      const { data: profile, error: profileError } = await supabase.from('profiles')
+        .select('full_name, platform_role, must_change_password, is_active')
+        .eq('id', session.user.id).single();
+      if (profileError || !profile) {
         setMessage('Não foi possível carregar seu perfil. Tente entrar novamente.');
+        setAccount(null);
+        setIsChecking(false);
+        return;
+      }
+      if (!(profile as ProfileRow).is_active) {
+        setMessage('Seu acesso está desativado. Fale com o administrador.');
         setAccount(null);
         setIsChecking(false);
         return;
@@ -80,18 +90,33 @@ export function AuthGate({ children }: { children: (account: CurrentAccount) => 
         setIsChecking(false);
         return;
       }
-      let membership = (memberships?.[0] ?? null) as MembershipRow | null;
-      if (!membership && profile.platform_role === 'netsecbr_admin') {
-        const { data: managedTenants } = await supabase.from('tenants').select('id, trade_name').order('created_at').limit(1);
-        const managedTenant = managedTenants?.[0];
-        if (managedTenant) {
-          membership = {
-            id: '',
-            tenant_id: managedTenant.id,
-            role: 'tenant_admin',
-            tenants: [{ trade_name: managedTenant.trade_name }],
-          };
+      const isPlatformAccount = profile.platform_role === 'netsecbr_admin';
+      if (isPlatformAccount) {
+        const { data: authorized, error: authorizationError } = await supabase.rpc('is_netsecbr_admin');
+        if (authorizationError || authorized !== true) {
+          setMessage('Acesso administrativo não autorizado. Fale com o proprietário da plataforma.');
+          setAccount(null);
+          setIsChecking(false);
+          return;
         }
+      }
+      const { data: memberships, error: membershipError } = isPlatformAccount
+        ? { data: [] as MembershipRow[], error: null }
+        : await supabase.from('tenant_memberships')
+            .select('id,tenant_id,role,tenants(trade_name)')
+            .eq('user_id', session.user.id).eq('is_active', true).limit(1);
+      if (membershipError) {
+        setMessage('Não foi possível carregar seu vínculo com o cliente.');
+        setAccount(null);
+        setIsChecking(false);
+        return;
+      }
+      const membership = (memberships?.[0] ?? null) as MembershipRow | null;
+      if (!isPlatformAccount && !membership) {
+        setMessage('Nenhum cliente ativo está vinculado ao seu usuário.');
+        setAccount(null);
+        setIsChecking(false);
+        return;
       }
       const { data: grantedPermissions, error: permissionsError } =
   membership?.id
@@ -126,13 +151,13 @@ const permissions = (grantedPermissions ?? []).map(
         roleLabel,
         tenantName: membershipTenant?.trade_name || 'NETSECBR Control Center',
         permissions, isTenantAdmin: membership?.role === 'tenant_admin', isNetsecbrAdmin: profile.platform_role === 'netsecbr_admin',
-        hasTenantMembership: Boolean(memberships?.[0]),
+        hasTenantMembership: Boolean(membership),
       });
       setIsChecking(false);
     };
 
     void loadAccount();
-  }, [session]);
+  }, [session?.user.id, mode]);
 
   useEffect(() => {
     if (!account?.hasTenantMembership || !account.tenantId) return;

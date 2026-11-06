@@ -227,3 +227,24 @@ Compras, estoque, catálogo de peças, part numbers, ERP operacional e IA/predi�
 | 12. Perfis e acessos | | | |
 
 **MVP V1 validado quando todos os cenários estiverem marcados como Aprovado.**
+
+## Cenários complementares — diretriz de 02/11/2026
+
+Os 12 cenários originais acima permanecem obrigatórios. Os testes A1–A12 complementam o aceite industrial e a expansão do modo Prestador; nenhum resultado é presumido por existir código, migration, build ou mock. Para cada execução registrar ambiente, usuário/perfil, dados de teste, passos, resultado esperado e observado, evidência e situação (Aprovado, Reprovado, Não executado ou Bloqueado).
+
+| ID | Teste e critério mínimo observável | Situação |
+| --- | --- | --- |
+| A1 | No detalhe de um robô, criar plano com Modelo MARV; salvar as 16 atividades e recarregar com conteúdo idêntico. | Não executado |
+| A2 | Criar planos anual e trimestral no mesmo ativo; alterar um sem modificar periodicidade ou atividades do outro. | Não executado |
+| A3 | Aprovar solicitações corretiva e preventiva; a preventiva exige seleção do plano ativo e gera OS vinculada, sem desviar para corretiva. | Não executado |
+| A4 | OS preventiva ativa bloqueia outra no mesmo equipamento com identificação e acesso à OS; concluída/cancelada não bloqueia novo ciclo. Testar simultaneidade separadamente. | Não executado |
+| A5 | Inicializar checklist da OS vazia, reabrir sem duplicar e alterar plano sem modificar o snapshot da OS anterior. | Não executado |
+| A6 | Fotografar pelo celular no card, enviar ao bucket privado, ver miniatura e recuperar após reabrir; outro tenant não acessa. | Não executado |
+| A7 | Atividade com medição exibe parâmetro, ponto e unidade; atividade sem medição não exibe campos genéricos; valores persistem. | Não executado |
+| A8 | Resultado não conforme abre uma única solicitação corretiva vinculada ao item, mesmo após repetição; nenhuma OS corretiva nasce automaticamente. | Não executado |
+| A9 | PDF final recuperável contém dados persistidos; supervisor aprova/devolve com autoria; assinatura fica vinculada à versão e auditada. | Não executado |
+| A10 | Prontuário do ativo mostra preventivas/corretivas e relatórios do próprio tenant, sem vazamento entre empresas. | Não executado |
+| A11 | Prestador autorizado registra atendimento avulso, fotos, assinatura e PDF sem plano industrial obrigatório. Homologar após entrega do modo leve. | Não executado |
+| A12 | No Chrome móvel, executar jornada com perfis reais; testar negações por tenant, unidade, perfil e Storage. | Não executado |
+
+Até a homologação, não apresentar aprovação, assinatura, PDF ou indicadores simulados como resultados reais. O modo Prestador é visão funcional da V1, mas sua jornada leve não é pré-condição da demonstração industrial imediata.

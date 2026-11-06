@@ -57,3 +57,14 @@ Evoluir para o MARV Collector, serviço local na rede industrial capaz de recebe
 Evoluir os dados operacionais para indicadores auditáveis de disponibilidade, SLA, custos, contratos, riscos e planos de ação. Esta camada reutiliza os registros operacionais e não cria uma segunda base de dados.
 
 Cada fase só avança após uso real, feedback de clientes e confirmação do valor entregue pela fase anterior.
+
+## Recorte de entrega e aceite — decisão de 02/11/2026
+
+Esta seção organiza as fases existentes sem apagar seus requisitos. O MARV Industrial e o MARV Prestador compartilham autenticação, dados, fotos, relatórios e auditoria; não serão sistemas ou bases separados.
+
+1. **Demonstração utilizável imediata:** checklist preventivo em cards responsivos, fotos e medições pertinentes com persistência; planos no ativo e OS com checklist idempotente; PDF recuperável, revisão e assinatura reais; histórico e indicadores básicos do ativo; acabamento e teste no Chrome móvel. Saint-Gobain e OS #50 são casos de teste, não regras especiais do produto.
+2. **Fechamento do MVP V1:** executar os 12 cenários originais de aceite e os cenários complementares A1–A12 com perfis autenticados; testar isolamento por tenant/unidade, Storage e auditoria; concluir manual distribuível e revisão integral de segurança antes de publicação controlada. Build e testes com dados fictícios não equivalem a homologação.
+3. **Expansão do modo Prestador:** jornada leve de atendimento avulso, com relatório, fotos, aceite e histórico, usando o mesmo motor funcional; homologar separadamente. Sua visão pertence à V1 do produto, mas não deve ser anunciada como concluída na demonstração industrial imediata.
+4. **Evoluções posteriores:** analytics avançado, cobrança automatizada, ERP, compras completas, IIoT e IA seguem nas fases já descritas. Revisar o recorte comercial de pagamentos antes de um lançamento público pago.
+
+Critério de uso da V1: supervisor e técnico com perfis reais concluem a jornada industrial sem simulação crítica, e o gestor recupera a intervenção no histórico. Produto demonstrável e MVP homologado são estados distintos.

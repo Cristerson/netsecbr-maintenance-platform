@@ -1,0 +1,377 @@
+-- Carga demonstrativa idempotente do tenant SAINT-GOBAIN (unidade Caieiras/SP)
+-- para o MARV, reutilizando a arquitetura da demo Dedini.
+--
+-- Uso previsto: SQL Editor ou CLI administrativo do AMBIENTE DE HOMOLOGAÇÃO
+-- Arquivo histórico de demonstração. Projeto antigo desativado. NÃO executar no banco principal.
+-- NÃO é uma migration: fica em bootstrap/ e não entra no histórico do banco.
+--
+-- Identificação (Etapa 2B):
+--   * tenant      -> trade_name 'Saint-Gobain'
+--   * unidade     -> 'Saint-Gobain — Caieiras' (código CAIEIRAS-SP-01)
+--   * identificador estável -> UUID fixo `demo_tenant_id` abaixo. Como o CNPJ
+--     é null, a reexecução NÃO depende de trade_name: o PK do tenant é a chave
+--     primária de reexecução. Antes de qualquer operação o script verifica
+--     conflitos (UUID existente com outro nome; homônimos de trade_name) e
+--     ABORTA com exceção em vez de corromper dados.
+--
+-- Escopo desta carga (Etapa 2):
+--   * tenant Saint-Gobain
+--   * centro de custo "Manutenção Industrial — Caieiras"
+--   * unidade "Saint-Gobain — Caieiras" (Caieiras/SP)
+--   * contato principal demonstrativo (Matheus Serafim)
+--   * domínios de e-mail autorizados (somente deste tenant)
+--   * plano e contrato de demonstração sem cobrança (25 ativos licenciados)
+--   * registro de auditoria da carga
+--
+-- Fora de escopo (próximas etapas): usuários em auth.users, robôs/ativos,
+-- categorias, leituras operacionais, solicitações, ordens de serviço e
+-- planos de manutenção. Este script NÃO cria usuários e NÃO contém senhas;
+-- nada aqui dispara e-mails ou notificações.
+--
+-- Idempotência: executar duas vezes não duplica registros (lookup por UUID
+-- fixo + guards `where not exists` + `on conflict ... do nothing`).
+--
+-- Isolamento: todos os INSERTs referenciam somente o tenant recém-criado;
+-- não há UPDATE/DELETE em linhas de outros tenants (Dedini inclusive).
+-- Os domínios autorizados têm unicidade por (tenant_id, domain), portanto
+-- não afetam permissões de nenhum outro cliente.
+--
+-- Limite de ativos: `robot_limit` NÃO é imposto por trigger nem por Edge
+-- Function na criação de ativos — é capacidade declarada/relatória (contagem
+-- de categorias `is_robot = true` no RPC de consumo). O plano demonstrativo
+-- usa 25 para acomodar futuras demos (robôs, compressores, HVAC etc.).
+--
+-- Trial: 90 dias. A regra global de acesso (`tenant_allows_operation`) depende
+-- de `tenants.status`, não de `trial_ends_at`; não existe job automático de
+-- expiração de trial no projeto. `trial_ends_at` está dentro da vigência de
+-- 12 meses, o que atende a regra da RPC `create_command_center_subscription`.
+-- A regra global de assinatura NÃO é alterada por este script.
+--
+-- CNPJ: `tenants.document_number` é única mas OPCIONAL (nullable). Nesta Etapa 3
+-- o valor `61.064.838/0111-78` foi informado pelo responsável; os dígitos
+-- verificadores foram conferidos e a verificação de unicidade no banco é feita
+-- pelo script antes de qualquer escrita (aborta se houver vínculo existente).
+--
+-- Parâmetros da carga:
+--   * p_cnpj          -> 61.064.838/0111-78 (informado na Etapa 3)
+--   * p_contact_email -> matheus.serafim@saint-gobain.com
+--   * p_contact_phone -> telefone demonstrativo
+--   * p_trial_days    -> 90
+
+do $$
+declare
+  actor_id uuid;
+  sg_tenant_id uuid;
+  cost_center_id uuid;
+  unit_id uuid;
+  demo_plan_id uuid;
+  candidate_count integer;
+  same_name_count integer;
+
+  -- Identificador demonstrativo estável do tenant Saint-Gobain.
+  -- UUID fixo: substitui a dependência de CNPJ/trade_name na reexecução.
+  demo_tenant_id uuid := 'beda618a-e7f0-4481-9cc9-d5aacab673cf';
+
+  -- Parâmetros editáveis da carga.
+  -- Prefixo p_: evita colisão de nomes entre variáveis PL/pgSQL e colunas
+  -- (mesmo problema da ambiguidade corrigida na migration 20260927175650).
+  p_legal_name text := 'Saint-Gobain do Brasil Produtos Industriais e para Construção Ltda.';
+  p_trade_name text := 'Saint-Gobain';
+  p_cnpj text := '61.064.838/0111-78'; -- CNPJ informado na Etapa 3 (validado antes do insert).
+  p_contact_name text := 'Matheus Serafim';
+  p_contact_email text := 'matheus.serafim@saint-gobain.com'; -- demonstrativo
+  p_contact_phone text := '(11) 0000-0000'; -- demonstrativo
+  p_cost_center_code text := 'CC-MANUT-CAIEIRAS';
+  p_cost_center_name text := 'Manutenção Industrial — Caieiras';
+  p_unit_code text := 'CAIEIRAS-SP-01';
+  p_unit_name text := 'Saint-Gobain — Caieiras';
+  p_plan_name text := 'Demonstração Saint-Gobain — sem cobrança';
+  p_plan_robot_limit integer := 25; -- capacidade demonstrativa (não bloqueante)
+  p_trial_days integer := 90;
+begin
+
+
+
+  -- 1. Ator para auditoria: Proprietário ativo da plataforma.
+  --    Falha explícita se não existir (mesma regra da carga Dedini).
+  select profile_row.id
+    into actor_id
+  from public.profiles profile_row
+  join public.platform_access_roles access_role
+    on access_role.user_id = profile_row.id
+  where profile_row.platform_role = 'netsecbr_admin'
+    and profile_row.is_active = true
+    and access_role.role = 'owner'
+    and access_role.is_active = true
+  order by profile_row.created_at
+  limit 1;
+
+  if actor_id is null then
+    raise exception 'Nenhum Proprietário ativo da plataforma foi encontrado para auditar a carga Saint-Gobain.';
+  end if;
+
+  -- 2. Lookup do tenant pelo identificador estável (UUID fixo) + verificação
+  --    de conflito ANTES de qualquer operação. Em caso de ambiguidade o
+  --    script aborta; nunca reutiliza o ID de outro tenant.
+  select count(*)
+    into candidate_count
+  from public.tenants
+  where id = demo_tenant_id;
+
+  if candidate_count > 0 then
+    -- UUID já existe: só pode ser o tenant desta carga.
+    select tenant_row.id
+      into sg_tenant_id
+    from public.tenants tenant_row
+    where tenant_row.id = demo_tenant_id;
+
+    if (select tenant_row.trade_name
+        from public.tenants tenant_row
+        where tenant_row.id = demo_tenant_id) is distinct from p_trade_name then
+      raise exception 'Conflito de identificador: o UUID % já pertence a outro tenant (diferente de %). Abortando sem alterações.', demo_tenant_id, p_trade_name;
+    end if;
+  else
+    -- UUID livre: verificar se já existe tenant homônimo/CNPJ duplicado.
+    if p_cnpj is not null and btrim(p_cnpj) <> '' then
+      select count(*)
+        into candidate_count
+      from public.tenants
+      where document_number = btrim(p_cnpj);
+
+      if candidate_count > 1 then
+        raise exception 'Conflito: mais de um tenant com o mesmo CNPJ informado. Abortando sem alterações.';
+      end if;
+
+      if candidate_count = 1 then
+        select tenant_row.id
+          into sg_tenant_id
+        from public.tenants tenant_row
+        where tenant_row.document_number = btrim(p_cnpj);
+      end if;
+    end if;
+
+    if sg_tenant_id is null then
+      select count(*)
+        into same_name_count
+      from public.tenants tenant_row
+      where tenant_row.trade_name = p_trade_name;
+
+      if same_name_count > 1 then
+        raise exception 'Conflito: existe mais de um tenant chamado %. Abortando sem alterações.', p_trade_name;
+      end if;
+
+      if same_name_count = 1 then
+        select tenant_row.id
+          into sg_tenant_id
+        from public.tenants tenant_row
+        where tenant_row.trade_name = p_trade_name;
+      end if;
+    end if;
+  end if;
+
+  if sg_tenant_id is null then
+    insert into public.tenants (id, legal_name, trade_name, document_number, status)
+    values (
+      demo_tenant_id,
+      p_legal_name,
+      p_trade_name,
+      nullif(btrim(coalesce(p_cnpj, '')), ''),
+      'active'
+    )
+    returning id into sg_tenant_id;
+  elsif p_cnpj is not null and btrim(p_cnpj) <> '' then
+    -- Preenche o CNPJ apenas se o tenant localizado ainda não tiver um.
+    update public.tenants tenant_row
+    set document_number = btrim(p_cnpj),
+        updated_at = now()
+    where tenant_row.id = sg_tenant_id
+      and tenant_row.document_number is null;
+  end if;
+
+  if sg_tenant_id is null then
+    raise exception 'Não foi possível localizar nem criar o tenant Saint-Gobain.';
+  end if;
+
+  if sg_tenant_id <> demo_tenant_id then
+    -- Tenant adotado por CNPJ/nome (criado fora desta carga): a partir daqui
+    -- a carga é restrita a ele, mantendo o isolamento.
+    raise notice 'Tenant Saint-Gobain adotado por identificador % (diferente do UUID demonstrativo).', sg_tenant_id;
+  end if;
+
+  -- 3. Contato principal demonstrativo (no máximo um primário ativo por tenant).
+  insert into public.tenant_contacts (tenant_id, full_name, email, phone, is_primary, is_active)
+  select
+    sg_tenant_id,
+    p_contact_name,
+    lower(btrim(p_contact_email)),
+    p_contact_phone,
+    true,
+    true
+  where not exists (
+    select 1
+    from public.tenant_contacts contact
+    where contact.tenant_id = sg_tenant_id
+      and contact.is_primary
+      and contact.is_active
+  );
+
+  -- 4. Domínios autorizados para cadastro de usuários (minúsculos; únicos por
+  --    tenant). Não afetam outros clientes: a unicidade é (tenant_id, domain)
+  --    e a Edge Function filtra sempre pelo tenant do solicitante.
+  insert into public.tenant_email_domains (tenant_id, domain, is_active)
+  select sg_tenant_id, lower(domain_value), true
+  from unnest(array[
+    'saintgobain.com',
+    'saintbobain.com',
+    'saint-gobain.com'
+  ]) as domain_value
+  on conflict (tenant_id, domain) do nothing;
+
+  -- 5. Plano demonstrativo sem cobrança (nome é único no catálogo).
+  --    robot_limit = 25 é capacidade declarada: nenhuma trigger/Edge Function
+  --    bloqueia criação de ativos acima dele; só alimenta relatórios de consumo.
+  insert into public.subscription_plans (
+    name, robot_limit, annual_price_cents, included_storage_bytes, description, is_active
+  )
+  values (
+    p_plan_name,
+    p_plan_robot_limit,
+    0,
+    52428800,
+    'Plano exclusivo de demonstração técnica (25 ativos), sem cobrança e sem uso comercial.',
+    true
+  )
+  on conflict (name) do nothing;
+
+  select plan_row.id
+    into demo_plan_id
+  from public.subscription_plans plan_row
+  where plan_row.name = p_plan_name;
+
+  -- 6. Contrato demonstrativo: no máximo um vigente por tenant
+  --    (índice único parcial em status draft/trial/active).
+  --    trial_ends_at (90 dias) permanece dentro da vigência de 12 meses,
+  --    respeitando a regra da RPC create_command_center_subscription.
+  if not exists (
+    select 1
+    from public.subscriptions subscription
+    where subscription.tenant_id = sg_tenant_id
+      and subscription.status in ('draft', 'trial', 'active')
+  ) then
+    insert into public.subscriptions (
+      tenant_id, plan_id, plan_name_snapshot, robot_limit_snapshot,
+      annual_price_cents_snapshot, included_storage_bytes_snapshot,
+      status, contract_start_date, billing_start_date, contract_end_date,
+      trial_ends_at, notes
+    )
+    select
+      sg_tenant_id,
+      plan_row.id,
+      plan_row.name,
+      plan_row.robot_limit,
+      plan_row.annual_price_cents,
+      plan_row.included_storage_bytes,
+      'trial',
+      current_date,
+      current_date,
+      (current_date + interval '12 months')::date,
+      (current_date + make_interval(days => p_trial_days))::timestamptz,
+      'Ambiente demonstrativo Saint-Gobain para avaliação técnica; sem cobrança.'
+    from public.subscription_plans plan_row
+    where plan_row.id = demo_plan_id;
+  end if;
+
+  -- 7. Centro de custo (único por tenant+code).
+  insert into public.cost_centers (tenant_id, code, name, is_active)
+  values (sg_tenant_id, p_cost_center_code, p_cost_center_name, true)
+  on conflict (tenant_id, code) do nothing;
+
+  select cc_row.id
+    into cost_center_id
+  from public.cost_centers cc_row
+  where cc_row.tenant_id = sg_tenant_id
+    and cc_row.code = p_cost_center_code;
+
+  -- 8. Unidade Caieiras/SP (única por tenant+code).
+  insert into public.units (tenant_id, cost_center_id, name, code, city, state, country, is_active)
+  values (
+    sg_tenant_id,
+    cost_center_id,
+    p_unit_name,
+    p_unit_code,
+    'Caieiras',
+    'SP',
+    'Brasil',
+    true
+  )
+  on conflict (tenant_id, code) do nothing;
+
+  select unit_row.id
+    into unit_id
+  from public.units unit_row
+  where unit_row.tenant_id = sg_tenant_id
+    and unit_row.code = p_unit_code;
+
+  -- 9. Auditoria da carga (guarda de idempotência própria).
+  insert into public.audit_logs (tenant_id, actor_id, action, resource_type, resource_id, metadata)
+  select
+    sg_tenant_id,
+    actor_id,
+    'saint_gobain_demo_seeded',
+    'tenant_demo',
+    sg_tenant_id::text,
+    jsonb_build_object(
+      'environment', 'staging',
+      'demo_tenant_id', demo_tenant_id,
+      'contact_email', lower(btrim(p_contact_email)),
+      'plan', p_plan_name,
+      'robot_limit', p_plan_robot_limit,
+      'unit_code', p_unit_code,
+      'cost_center_code', p_cost_center_code,
+      'trial_days', p_trial_days,
+      'document_number', (select tenant_row.document_number from public.tenants tenant_row where tenant_row.id = sg_tenant_id)
+    )
+  where not exists (
+    select 1
+    from public.audit_logs audit
+    where audit.tenant_id = sg_tenant_id
+      and audit.action = 'saint_gobain_demo_seeded'
+  );
+end;
+$$;
+
+
+
+-- Conferência pós-carga, somente leitura (Saint-Gobain).
+select
+  tenant.legal_name,
+  tenant.trade_name,
+  tenant.document_number,
+  tenant.status,
+  contact.full_name as primary_contact,
+  contact.email as contact_email,
+  subscription.status as contract_status,
+  subscription.plan_name_snapshot,
+  subscription.robot_limit_snapshot,
+  subscription.trial_ends_at,
+  (select count(*) from public.tenant_email_domains d where d.tenant_id = tenant.id and d.is_active) as authorized_domains,
+  (select count(*) from public.cost_centers cc where cc.tenant_id = tenant.id) as cost_centers,
+  (select count(*) from public.units u where u.tenant_id = tenant.id) as units
+from public.tenants tenant
+left join public.tenant_contacts contact
+  on contact.tenant_id = tenant.id and contact.is_primary and contact.is_active
+left join public.subscriptions subscription
+  on subscription.tenant_id = tenant.id
+  and subscription.status in ('draft', 'trial', 'active')
+where tenant.trade_name = 'Saint-Gobain';
+
+
+-- Conferência de preservação: lista de tenants em ordem de criação.
+-- A linha da Dedini deve permanecer exatamente como estava antes da carga.
+select
+  tenant.trade_name,
+  tenant.document_number,
+  tenant.status,
+  tenant.created_at
+from public.tenants tenant
+order by tenant.created_at;

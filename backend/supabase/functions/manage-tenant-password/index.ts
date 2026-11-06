@@ -66,17 +66,18 @@ Deno.serve(async (request) => {
     const userId = String(body.userId ?? '')
     if (!tenantId || !userId) return response({ error: 'Cliente e usuário são obrigatórios.' }, 400, headers)
 
-    const [{ data: callerProfile, error: callerProfileError }, { data: callerMembership, error: callerMembershipError }, { data: targetMembership, error: targetMembershipError }] = await Promise.all([
+    const [{ data: callerProfile, error: callerProfileError }, { data: callerMembership, error: callerMembershipError }, { data: targetMembership, error: targetMembershipError }, { data: callerPlatformAccess, error: platformAccessError }] = await Promise.all([
       supabaseAdmin.from('profiles').select('platform_role, is_active').eq('id', caller.id).maybeSingle(),
       supabaseAdmin.from('tenant_memberships').select('id').eq('tenant_id', tenantId).eq('user_id', caller.id).eq('role', 'tenant_admin').eq('is_active', true).maybeSingle(),
       supabaseAdmin.from('tenant_memberships').select('id').eq('tenant_id', tenantId).eq('user_id', userId).eq('is_active', true).maybeSingle(),
+      supabaseAdmin.from('platform_access_roles').select('user_id').eq('user_id', caller.id).in('role', ['owner', 'operator']).eq('is_active', true).maybeSingle(),
     ])
 
-    if (callerProfileError || callerMembershipError || targetMembershipError) {
+    if (callerProfileError || callerMembershipError || targetMembershipError || platformAccessError) {
       return response({ error: 'Não foi possível validar a permissão para redefinir a senha.' }, 500, headers)
     }
 
-    const isNetsecbrAdmin = callerProfile?.platform_role === 'netsecbr_admin' && callerProfile.is_active
+    const isNetsecbrAdmin = callerProfile?.platform_role === 'netsecbr_admin' && callerProfile.is_active && Boolean(callerPlatformAccess)
     if (!isNetsecbrAdmin && !callerMembership) return response({ error: 'Você não tem permissão para redefinir senhas neste cliente.' }, 403, headers)
     if (!targetMembership) return response({ error: 'Usuário ativo não encontrado neste cliente.' }, 404, headers)
 
@@ -85,12 +86,24 @@ Deno.serve(async (request) => {
       if (targetUserError || !targetUser.user?.email) return response({ error: 'Não foi possível localizar o e-mail do usuário.' }, 404, headers)
 
       const redirectTo = String(body.redirectTo ?? '')
+      if (redirectTo) {
+        try {
+          if (!allowedOrigins.includes(new URL(redirectTo).origin)) {
+            return response({ error: 'Destino de recuperacao nao autorizado.' }, 400, headers)
+          }
+        } catch {
+          return response({ error: 'Destino de recuperacao invalido.' }, 400, headers)
+        }
+      }
       const { error } = await supabaseAdmin.auth.resetPasswordForEmail(targetUser.user.email, redirectTo ? { redirectTo } : undefined)
       if (error) return response({ error: 'Não foi possível enviar o e-mail de recuperação.' }, 500, headers)
       return response({ success: true }, 200, headers)
     }
 
     if (action !== 'set_temporary') return response({ error: 'Ação de senha inválida.' }, 400, headers)
+    if (userId === 'e00995cb-bc07-4ccb-9834-7798ed7f9af9') {
+      return response({ error: 'A senha da conta proprietária principal não pode ser redefinida administrativamente. Use a recuperação voluntária.' }, 403, headers)
+    }
 
     const mode = String(body.mode ?? 'generated')
     const password = mode === 'generated' ? generateTemporaryPassword() : String(body.password ?? '')

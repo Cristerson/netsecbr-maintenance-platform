@@ -1,0 +1,28 @@
+.cc-executive { margin-bottom: 26px; }
+.cc-executive-heading { display: flex; align-items: end; justify-content: space-between; gap: 14px; margin-bottom: 16px; }
+.cc-executive-heading h3 { margin: 3px 0 0; color: #0b2850; font-size: 20px; }
+.cc-executive-heading > span { color: #72839b; font-size: 12px; }
+.cc-executive-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.cc-executive-panel { min-width: 0; border-top: 3px solid #1478b7; background: linear-gradient(150deg, #fff, #f8fbff); }
+.cc-panel-heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin-bottom: 17px; }
+.cc-panel-heading h4 { margin: 0; color: #0c2b53; font-size: 15px; }
+.cc-panel-heading button { border: 0; padding: 4px 0; color: #086baa; background: transparent; font-size: 12px; font-weight: 700; cursor: pointer; }
+.cc-stat-grid { display: flex; flex-wrap: wrap; gap: 10px; }
+.cc-stat-grid > div { flex: 1 1 95px; padding: 11px; border-radius: 8px; background: #edf5fc; }
+.cc-stat-grid strong { display: block; color: #0b2850; font-size: 24px; line-height: 1.2; }
+.cc-stat-grid span { display: block; color: #607693; font-size: 11px; margin-top: 5px; }
+.cc-panel-note { color: #73849a; font-size: 11px; margin: 13px 0 0; }
+.cc-service-list { display: grid; gap: 1px; }
+.cc-service-list p, .cc-tenant-tickets p { display: flex; justify-content: space-between; gap: 10px; align-items: center; margin: 0; padding: 8px 0; border-bottom: 1px solid #e5edf6; color: #405772; font-size: 12px; }
+.cc-service-list b { white-space: nowrap; font-size: 11px; }
+.cc-good { color: #177e55; }.cc-bad { color: #bc3c4c; }.cc-unknown { color: #9a6b1c; }
+.cc-executive-support { grid-column: 1 / -1; }
+.cc-tenant-tickets { margin-top: 16px; }
+.cc-tenant-tickets > strong { font-size: 12px; color: #0b2850; }
+.cc-executive-error { color: #b83b49; font-size: 12px; }
+.cc-alert-strip { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; margin: 0 0 16px; padding: 10px 12px; border: 1px solid #f2daa1; border-radius: 9px; background: #fff9e9; font-size: 11px; color: #795112; }
+.cc-alert-strip strong { margin-right: 5px; }
+.cc-alert-strip span { padding: 4px 7px; border-radius: 5px; background: #fff0c8; }
+@media (max-width: 760px) { .cc-executive-grid { grid-template-columns: 1fr; }.cc-executive-heading { align-items: start; flex-direction: column; } }
+.command-center-support-entry { display: flex; align-items: center; flex-wrap: wrap; gap: 9px; margin: 0 0 16px; }
+.command-center-support-entry span { color: #71839c; font-size: 11px; }

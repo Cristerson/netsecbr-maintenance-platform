@@ -8,13 +8,14 @@ type Props = {
   disabled?: boolean;
   maxPhotos?: number;
   hint?: string;
+  label?: string;
 };
 
 const allowedTypes = new Set(['image/jpeg', 'image/png', 'image/webp']);
 const maxFileBytes = 10 * 1024 * 1024;
 
 /** Seleção local de evidências; upload privado requer Storage/RLS próprios. */
-export function ReportPhotoPicker({ files, onChange, disabled = false, maxPhotos = 12, hint = 'As imagens estão apenas neste dispositivo até que o relatório seja salvo em armazenamento privado.' }: Props) {
+export function ReportPhotoPicker({ files, onChange, disabled = false, maxPhotos = 12, hint = 'As imagens estão apenas neste dispositivo até que o relatório seja salvo em armazenamento privado.', label = 'Fotografias do atendimento' }: Props) {
   const [previews, setPreviews] = useState<Preview[]>([]);
   const [error, setError] = useState('');
 
@@ -49,7 +50,7 @@ export function ReportPhotoPicker({ files, onChange, disabled = false, maxPhotos
 
   return (
     <div className="field">
-      <span>Fotografias do atendimento</span>
+      <span>{label}</span>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12 }}>
         <label>
           <span>Usar câmera</span>

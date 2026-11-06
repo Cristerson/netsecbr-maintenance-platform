@@ -1,0 +1,7 @@
+.platform-shell .sidebar { background: linear-gradient(180deg, #05142f, #071d3b); }
+.platform-shell .workspace { background: #0b2b55; }
+.platform-shell .sidebar nav { gap: 3px; }
+.platform-shell .sidebar nav button { font-size: 12px; text-align: left; }
+.platform-shell .sidebar nav button.active { background: #075c98; }
+.platform-session-badge { padding: 7px 10px; border-radius: 999px; background: #e6f2fc; color: #075b97; font-size: 11px; font-weight: 700; }
+@media (max-width: 650px) { .platform-session-badge { display: none; } }

@@ -1,13 +1,9 @@
-import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import {
   Activity,
   AlertTriangle,
   ArrowLeft,
-  Box,
   Building2,
-  CalendarClock,
-  ClipboardList,
-  CreditCard,
   FileText,
   LifeBuoy,
   RefreshCw,
@@ -31,9 +27,13 @@ import {
 import { TenantFranchisePanel } from './tenant-franchise-panel';
 import { PlatformTeamAdmin } from './platform-team-admin';
 import { CommandCenterSupportAdmin } from './command-center-support-admin';
+import { CommandCenterOverview } from './command-center-overview';
+import { CommandCenterTenantAudit } from './command-center-tenant-audit';
 import { CommandCenterClientForm } from './command-center-client-form';
 import { CommandCenterTenantUserProvisioning } from './command-center-tenant-user-provisioning';
 import { UserAdmin } from './user-admin';
+import { TenantEmailDomainsAdmin } from './tenant-email-domains-admin';
+import { CommandCenterAccessMonitoring } from './command-center-access-monitoring';
 import { supabase } from './supabase';
 
 
@@ -58,7 +58,7 @@ const franchiseFilterBySituation: Partial<Record<SituationFilter, FranchiseFilte
   franchise_unconfigured: 'unconfigured',
 };
 
-type CommandCenterView = 'home' | 'clients' | 'health' | 'contracts' | 'platform_team' | 'support';
+export type CommandCenterView = 'home' | 'clients' | 'health' | 'contracts' | 'platform_team' | 'support' | 'settings';
 
 type TenantEditForm = {
   legalName: string;
@@ -68,23 +68,18 @@ type TenantEditForm = {
   reason: string;
 };
 
-/* Módulo SaaS ainda não implementado: aparece na home apenas como planejado. */
-const plannedModules = [
-  { eyebrow: 'FINANCEIRO', title: 'Cobrança', icon: <CreditCard /> },
-];
-
-type ClientDetailTabId = 'overview' | 'users' | 'contract' | 'operation' | 'audit';
+type ClientDetailTabId = 'overview' | 'users' | 'contract' | 'audit';
+const accessMonitoringEnabled = import.meta.env.VITE_ACCESS_MONITORING_ENABLED === 'true';
 
 /* Faixa de comandos do dossiê do cliente: navegação interna, sem nova rota. */
 const clientDetailTabs: { id: ClientDetailTabId; label: string }[] = [
   { id: 'overview', label: 'Visão geral' },
   { id: 'users', label: 'Usuários e acessos' },
   { id: 'contract', label: 'Contrato e licença' },
-  { id: 'operation', label: 'Operação' },
   { id: 'audit', label: 'Auditoria' },
 ];
 
-const tableGrid = { gridTemplateColumns: '1.5fr .95fr .75fr .7fr .6fr .6fr .8fr .7fr 1.05fr' };
+const tableGrid = { gridTemplateColumns: '1.6fr 1fr .8fr .8fr .9fr 1fr' };
 
 function formatCnpj(value: string) {
   const digits = value.replace(/\D/g, '').slice(0, 14);
@@ -1367,20 +1362,35 @@ function ContractsAndLicensesModule({
   );
 }
 
-export function CommandCenter({ isNetsecbrAdmin, currentUserId }: { isNetsecbrAdmin: boolean; currentUserId: string }) {
+export function CommandCenter({ isNetsecbrAdmin, currentUserId, requestedView, onViewChange }: { isNetsecbrAdmin: boolean; currentUserId: string; requestedView?: CommandCenterView; onViewChange?: (view: CommandCenterView) => void }) {
+  const navigationKey = `marv:command-center:${currentUserId}`;
+  const savedNavigation = (() => {
+    try { return JSON.parse(window.sessionStorage.getItem(navigationKey) ?? '{}') as Record<string, unknown>; }
+    catch { return {}; }
+  })();
   const [search, setSearch] = useState('');
   const [situationFilter, setSituationFilter] = useState<SituationFilter>('all');
-  const [selectedTenantId, setSelectedTenantId] = useState<string | null>(null);
-  const [view, setView] = useState<CommandCenterView>('home');
+  const [selectedTenantId, setSelectedTenantId] = useState<string | null>(typeof savedNavigation.tenantId === 'string' ? savedNavigation.tenantId : null);
+  const [localView, setLocalView] = useState<CommandCenterView>(() => requestedView ?? (
+    ['home', 'clients', 'health', 'contracts', 'platform_team', 'support', 'settings'].includes(String(savedNavigation.view))
+      ? savedNavigation.view as CommandCenterView : 'home'));
+  const view = requestedView ?? localView;
+  const setView = (nextView: CommandCenterView) => { setLocalView(nextView); onViewChange?.(nextView); };
   const [isEditingTenant, setIsEditingTenant] = useState(false);
   const [isSavingTenant, setIsSavingTenant] = useState(false);
   const [tenantEditMessage, setTenantEditMessage] = useState('');
   const [tenantEditError, setTenantEditError] = useState('');
   const [tenantForm, setTenantForm] = useState<TenantEditForm | null>(null);
   const [isCreatingTenant, setIsCreatingTenant] = useState(false);
-  const [clientDetailTab, setClientDetailTab] = useState<ClientDetailTabId>('overview');
+  const [clientDetailTab, setClientDetailTab] = useState<ClientDetailTabId>(() =>
+    clientDetailTabs.some((tab) => tab.id === savedNavigation.tab) ? savedNavigation.tab as ClientDetailTabId : 'overview');
+  const previousTenantId = useRef(selectedTenantId);
+  useEffect(() => {
+    try { window.sessionStorage.setItem(navigationKey, JSON.stringify({ view, tenantId: selectedTenantId, tab: clientDetailTab })); }
+    catch { /* storage indisponível */ }
+  }, [navigationKey, view, selectedTenantId, clientDetailTab]);
   const [currentUserName, setCurrentUserName] = useState('');
-  const { tenants, totals, isLoading, error, reload } = useCommandCenterData();
+  const { tenants, isLoading, error, responseMs, reload } = useCommandCenterData();
   const {
     items: consumptionItems,
     isLoading: isConsumptionLoading,
@@ -1428,7 +1438,7 @@ export function CommandCenter({ isNetsecbrAdmin, currentUserId }: { isNetsecbrAd
 
   const moduleMeta =
     view === 'health'
-      ? { eyebrow: 'MARV COMMAND CENTER · SAÚDE DA CARTEIRA', title: 'Saúde da carteira' }
+      ? { eyebrow: 'MARV COMMAND CENTER · SITUAÇÃO DA CARTEIRA', title: 'Situação dos clientes' }
       : { eyebrow: 'MARV COMMAND CENTER · CLIENTES', title: 'Clientes' };
 
   useEffect(() => {
@@ -1439,7 +1449,10 @@ export function CommandCenter({ isNetsecbrAdmin, currentUserId }: { isNetsecbrAd
 
   /* A faixa do dossiê sempre volta para "Visão geral" quando o cliente muda. */
   useEffect(() => {
-    setClientDetailTab('overview');
+    if (previousTenantId.current !== selectedTenantId) {
+      previousTenantId.current = selectedTenantId;
+      setClientDetailTab('overview');
+    }
   }, [selectedTenantId]);
 
   /* Nome do administrador NETSECBR para a linha de sessão do módulo de usuários. */
@@ -1511,6 +1524,17 @@ export function CommandCenter({ isNetsecbrAdmin, currentUserId }: { isNetsecbrAd
           Gerencie clientes, contratos, cobrança, suporte e segurança da plataforma.
         </p>
 
+        <CommandCenterOverview
+          tenants={tenants}
+          tenantsLoading={isLoading}
+          tenantsError={error}
+          responseMs={responseMs}
+          onClients={() => openView('clients')}
+          onContracts={() => openView('contracts')}
+          onSupport={() => openView('support')}
+          onTeam={() => openView('platform_team')}
+        />
+
         <div className="admin-module-grid">
           <button className="admin-module-card" onClick={() => openView('clients')}>
             <div className="metric-icon">
@@ -1546,25 +1570,12 @@ export function CommandCenter({ isNetsecbrAdmin, currentUserId }: { isNetsecbrAd
             <small>Abrir módulo →</small>
           </button>
 
-          {plannedModules.map((module) => (
-            <article
-              className="admin-module-card"
-              key={module.title}
-              style={{ cursor: 'default' }}
-            >
-              <div className="metric-icon">{module.icon}</div>
-              <p>{module.eyebrow}</p>
-              <h2>{module.title}</h2>
-              <small style={{ color: '#8798ae' }}>Módulo em construção</small>
-            </article>
-          ))}
-
           <button className="admin-module-card" onClick={() => openView('health')}>
             <div className="metric-icon">
               <Activity />
             </div>
             <p>ANÁLISE</p>
-            <h2>Saúde da carteira</h2>
+            <h2>Situação dos clientes</h2>
             <small>Abrir módulo →</small>
           </button>
         </div>
@@ -1582,6 +1593,24 @@ export function CommandCenter({ isNetsecbrAdmin, currentUserId }: { isNetsecbrAd
 
   if (view === 'support') {
     return <CommandCenterSupportAdmin tenants={tenants} onBack={goHome} />;
+  }
+
+  if (view === 'settings') {
+    return <section className="content admin-panel">
+      <div className="admin-module-header"><div><p className="eyebrow">NETSECBR · PLATAFORMA</p><h2>Configurações da plataforma</h2></div></div>
+      <article className="panel"><h3>Operação segura</h3>
+        <p>Administração de clientes, contratos, equipe e atendimento está disponível nos módulos próprios do Command Center.</p>
+        <p>Chaves e segredos não são expostos no navegador. Acesso como suporte a um cliente permanece desabilitado até haver autorização por tenant e auditoria no backend.</p>
+      </article>
+    </section>;
+  }
+
+  if (view === 'health') {
+    return <section className="content admin-panel">
+      <div className="admin-module-header"><div><p className="eyebrow">NETSECBR · OBSERVABILIDADE</p><h2>Saúde dos serviços</h2></div></div>
+      <CommandCenterOverview tenants={tenants} tenantsLoading={isLoading} tenantsError={error} responseMs={responseMs}
+        onClients={() => openView('clients')} onContracts={() => openView('contracts')} onSupport={() => openView('support')} onTeam={() => openView('platform_team')} />
+    </section>;
   }
 
   if (isLoading && tenants.length === 0) {
@@ -1752,6 +1781,11 @@ export function CommandCenter({ isNetsecbrAdmin, currentUserId }: { isNetsecbrAd
           ))}
         </div>
 
+        <div className="command-center-support-entry">
+          <button type="button" className="secondary" disabled aria-disabled="true">Acessar como suporte</button>
+          <span>Indisponível até haver autorização limitada a este cliente e auditoria do atendimento no backend.</span>
+        </div>
+
         {clientDetailTab === 'overview' && (
           <>
             <article className="panel">
@@ -1821,14 +1855,7 @@ export function CommandCenter({ isNetsecbrAdmin, currentUserId }: { isNetsecbrAd
 
             <div className="metrics">
               <Metric label="Usuários ativos" value={String(selectedTenant.activeUsers)} icon={<Users size={17} />} />
-              <Metric label="Ativos cadastrados" value={String(selectedTenant.assetCount)} icon={<Box size={17} />} />
-              <Metric label="OS abertas" value={String(selectedTenant.openWorkOrders)} icon={<ClipboardList size={17} />} />
-              <Metric
-                label="Preventivas atrasadas"
-                value={String(selectedTenant.overduePreventivePlans)}
-                icon={<CalendarClock size={17} />}
-                warn={selectedTenant.overduePreventivePlans > 0}
-              />
+              <Metric label="Situação do acesso" value={selectedTenant.statusLabel} icon={<Building2 size={17} />} warn={!selectedTenant.isActive} />
             </div>
 
             {isTenantDetailLoading && (
@@ -1864,6 +1891,10 @@ export function CommandCenter({ isNetsecbrAdmin, currentUserId }: { isNetsecbrAd
 
         {clientDetailTab === 'users' && (
           <>
+            {accessMonitoringEnabled && currentUserId === 'e00995cb-bc07-4ccb-9834-7798ed7f9af9' && (
+              <CommandCenterAccessMonitoring tenantId={selectedTenant.tenantId} tenantName={selectedTenant.tradeName} />
+            )}
+            <TenantEmailDomainsAdmin tenantId={selectedTenant.tenantId} />
             <article className="panel">
               <div className="panel-head">
                 <div>
@@ -1896,41 +1927,19 @@ export function CommandCenter({ isNetsecbrAdmin, currentUserId }: { isNetsecbrAd
                 <h2>Contrato e licença</h2>
               </div>
             </div>
-            <div className="insight">
-              <FileText size={18} />
-              <p>Esta área será integrada ao dossiê do cliente na próxima etapa.</p>
-            </div>
-          </article>
-        )}
-
-        {clientDetailTab === 'operation' && (
-          <article className="panel">
-            <div className="panel-head">
-              <div>
-                <p className="eyebrow">OPERAÇÃO</p>
-                <h2>Operação</h2>
-              </div>
-            </div>
-            <div className="insight">
-              <Activity size={18} />
-              <p>Esta área será integrada ao dossiê do cliente na próxima etapa.</p>
-            </div>
+            {isTenantDetailLoading ? <p className="empty">Carregando contrato…</p>
+              : tenantDetail?.subscription ? <div className="command-center-client-summary">
+                <p><span>Plano</span><strong>{tenantDetail.subscription.planName}</strong></p>
+                <p><span>Situação</span><strong>{tenantDetail.subscription.statusLabel}</strong></p>
+                <p><span>Início</span><strong>{formatDate(tenantDetail.subscription.contractStartDate)}</strong></p>
+                <p><span>Fim</span><strong>{tenantDetail.subscription.contractEndDate ? formatDate(tenantDetail.subscription.contractEndDate) : 'Não definido'}</strong></p>
+              </div> : <p className="empty">Este cliente não possui contrato vigente.</p>}
+            <button type="button" className="secondary" onClick={() => openView('contracts')}>Gerenciar contratos e licenças</button>
           </article>
         )}
 
         {clientDetailTab === 'audit' && (
-          <article className="panel">
-            <div className="panel-head">
-              <div>
-                <p className="eyebrow">AUDITORIA</p>
-                <h2>Auditoria</h2>
-              </div>
-            </div>
-            <div className="insight">
-              <ClipboardList size={18} />
-              <p>Esta área será integrada ao dossiê do cliente na próxima etapa.</p>
-            </div>
-          </article>
+          <CommandCenterTenantAudit tenantId={selectedTenant.tenantId} />
         )}
       </section>
     );
@@ -1997,43 +2006,6 @@ export function CommandCenter({ isNetsecbrAdmin, currentUserId }: { isNetsecbrAd
         </div>
       )}
 
-      {view === 'health' && (
-        <div className="metrics">
-          <Metric
-            label="Clientes ativos"
-            value={String(totals.activeTenants)}
-            icon={<Building2 size={17} />}
-          />
-          <Metric
-            label="Clientes inativos"
-            value={String(totals.inactiveTenants)}
-            icon={<Building2 size={17} />}
-            warn={totals.inactiveTenants > 0}
-          />
-          <Metric
-            label="Usuários ativos"
-            value={String(totals.activeUsers)}
-            icon={<Users size={17} />}
-          />
-          <Metric
-            label="Ativos cadastrados"
-            value={String(totals.assetCount)}
-            icon={<Box size={17} />}
-          />
-          <Metric
-            label="Ordens de serviço abertas"
-            value={String(totals.openWorkOrders)}
-            icon={<ClipboardList size={17} />}
-          />
-          <Metric
-            label="Preventivas atrasadas"
-            value={String(totals.overduePreventivePlans)}
-            icon={<CalendarClock size={17} />}
-            warn={totals.overduePreventivePlans > 0}
-          />
-        </div>
-      )}
-
       <article className="panel table">
         <div className="panel-head">
           <div>
@@ -2073,9 +2045,6 @@ export function CommandCenter({ isNetsecbrAdmin, currentUserId }: { isNetsecbrAd
               <span>CNPJ</span>
               <span>Situação</span>
               <span>Usuários ativos</span>
-              <span>Ativos</span>
-              <span>OS abertas</span>
-              <span>Preventivas atrasadas</span>
               <span>Robôs (franquia)</span>
               <span>Franquia</span>
             </div>
@@ -2106,9 +2075,6 @@ export function CommandCenter({ isNetsecbrAdmin, currentUserId }: { isNetsecbrAd
                     {tenant.statusLabel}
                   </span>
                   <span>{tenant.activeUsers}</span>
-                  <span>{tenant.assetCount}</span>
-                  <span>{tenant.openWorkOrders}</span>
-                  <span>{tenant.overduePreventivePlans}</span>
                   <span title={franchise ? 'Robôs cadastrados x franquia contratada' : 'Franquias indisponíveis'}>
                     {formatConsumptionSummary(franchise?.itemsByCode.get('robots.registered'))}
                   </span>

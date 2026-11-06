@@ -2,6 +2,8 @@ import { type FormEvent, useCallback, useEffect, useState } from 'react';
 import { Pencil, Plus, Power, RefreshCw, Trash2, X } from 'lucide-react';
 import { supabase } from './supabase';
 import { AssetCategoryAdmin } from './asset-category-admin';
+import { workOrderDisplayTitle } from './work-order-label';
+import './asset-history.css';
 
 type Props = {
   tenantId: string;
@@ -12,7 +14,17 @@ type Props = {
 
 type AssetPlan = { id: string; name: string; periodicity_days: number; next_due_date: string; is_active: boolean };
 type AssetOrder = { id: string; order_number: number; title: string; type: string; status: string;
-  opened_at: string; assigned_profile: { full_name: string | null } | null };
+  opened_at: string; completed_at: string | null; assigned_profile: { full_name: string | null } | null;
+  checklist_done?: number; checklist_total?: number; checklist_nonconformities?: number;
+  photo_count?: number; report_revision?: number; report_state?: string; report_url?: string };
+
+const orderStatusLabels: Record<string, string> = {
+  open: 'Aberta', in_progress: 'Em execução', waiting_material: 'Aguardando material',
+  completed: 'Concluída', cancelled: 'Cancelada',
+};
+const reportStateLabels: Record<string, string> = {
+  draft: 'rascunho', submitted: 'aguardando revisão', returned: 'devolvido', approved: 'aprovado',
+};
 
 type AssetStatus = 'active' | 'inactive' | 'maintenance' | 'stopped' | 'retired';
 type Criticality = 'low' | 'medium' | 'high' | 'critical';
@@ -136,6 +148,8 @@ export function AssetAdmin({ tenantId, canManage, onOpenPlan, onOpenOrder }: Pro
   const [operationalReadings, setOperationalReadings] = useState<AssetOperationalReading[]>([]);
   const [assetPlans, setAssetPlans] = useState<AssetPlan[]>([]);
   const [assetOrders, setAssetOrders] = useState<AssetOrder[]>([]);
+  const [historyCounts, setHistoryCounts] = useState({ preventive: 0, corrective: 0, pending: 0 });
+  const [isHistoryLoading, setIsHistoryLoading] = useState(false);
   const [relatedError, setRelatedError] = useState('');
   const [readingForm, setReadingForm] = useState(emptyReadingForm);
   const [isReadingSaving, setIsReadingSaving] = useState(false);
@@ -260,6 +274,8 @@ export function AssetAdmin({ tenantId, canManage, onOpenPlan, onOpenOrder }: Pro
     setOperationalReadings([]);
     setAssetPlans([]);
     setAssetOrders([]);
+    setHistoryCounts({ preventive: 0, corrective: 0, pending: 0 });
+    setIsHistoryLoading(false);
     setRelatedError('');
     setReadingForm(emptyReadingForm);
     setReadingError('');
@@ -279,6 +295,8 @@ export function AssetAdmin({ tenantId, canManage, onOpenPlan, onOpenOrder }: Pro
     setOperationalReadings([]);
     setAssetPlans([]);
     setAssetOrders([]);
+    setHistoryCounts({ preventive: 0, corrective: 0, pending: 0 });
+    setIsHistoryLoading(false);
     setRelatedError('');
     setReadingForm(emptyReadingForm);
     setReadingError('');
@@ -301,22 +319,76 @@ export function AssetAdmin({ tenantId, canManage, onOpenPlan, onOpenOrder }: Pro
     setIsFormOpen(true);
   }
 
-  async function loadAssetRelations(assetId: string) {
-    const [plans, orders] = await Promise.all([
+  async function loadAssetRelations(assetId: string, offset = 0, append = false) {
+    setIsHistoryLoading(true);
+    const [plans, orders, preventiveCount, correctiveCount, pendingCount] = await Promise.all([
       supabase.from('maintenance_plans').select('id,name,periodicity_days,next_due_date,is_active')
         .eq('tenant_id', tenantId).eq('asset_id', assetId).order('next_due_date'),
       supabase.from('work_orders')
-        .select('id,order_number,title,type,status,opened_at,assigned_profile:profiles!work_orders_assigned_to_fkey(full_name)')
+        .select('id,order_number,title,type,status,opened_at,completed_at,assigned_profile:profiles!work_orders_assigned_to_fkey(full_name)')
         .eq('tenant_id', tenantId).eq('asset_id', assetId)
-        .in('type', ['preventive', 'corrective']).order('opened_at', { ascending: false }).limit(100),
+        .in('type', ['preventive', 'corrective']).order('opened_at', { ascending: false })
+        .range(offset, offset + 99),
+      supabase.from('work_orders').select('id', { count: 'exact', head: true })
+        .eq('tenant_id', tenantId).eq('asset_id', assetId).eq('type', 'preventive'),
+      supabase.from('work_orders').select('id', { count: 'exact', head: true })
+        .eq('tenant_id', tenantId).eq('asset_id', assetId).eq('type', 'corrective'),
+      supabase.from('work_orders').select('id', { count: 'exact', head: true })
+        .eq('tenant_id', tenantId).eq('asset_id', assetId).in('type', ['preventive', 'corrective'])
+        .in('status', ['open', 'in_progress', 'waiting_material']),
     ]);
-    if (plans.error || orders.error) {
-      setRelatedError(`Não foi possível carregar planos ou histórico: ${plans.error?.message ?? orders.error?.message}`);
+    if (plans.error || orders.error || preventiveCount.error || correctiveCount.error || pendingCount.error) {
+      setRelatedError('Não foi possível carregar o histórico e as contagens confirmadas do ativo. Atualize e tente novamente.');
+      setIsHistoryLoading(false);
       return;
     }
     setRelatedError('');
     setAssetPlans((plans.data ?? []) as AssetPlan[]);
-    setAssetOrders((orders.data ?? []) as unknown as AssetOrder[]);
+    setHistoryCounts({ preventive: preventiveCount.count ?? 0, corrective: correctiveCount.count ?? 0, pending: pendingCount.count ?? 0 });
+    const orderRows = (orders.data ?? []) as unknown as AssetOrder[];
+    const preventiveIds = orderRows.filter((order) => order.type === 'preventive').map((order) => order.id);
+    if (!preventiveIds.length) {
+      setAssetOrders((current) => append ? [...current, ...orderRows] : orderRows);
+      setIsHistoryLoading(false);
+      return;
+    }
+    const [{ data: summaries, error: summaryError }, { data: reportRows, error: reportError }] = await Promise.all([
+      supabase.rpc('get_preventive_checklist_summary', { target_work_order_ids: preventiveIds }),
+      supabase.from('work_order_report_revisions')
+        .select('work_order_id,revision_number,state,pdf_storage_path').eq('tenant_id', tenantId)
+        .eq('is_current', true).in('work_order_id', preventiveIds),
+    ]);
+    if (summaryError || reportError) {
+      setRelatedError('OS carregadas, mas os resumos ou relatórios dependem da migration preventiva. Contagens e históricos continuam preservados.');
+    }
+    const summaryByOrder = new Map((summaries ?? []).map((summary: any) => [summary.work_order_id, summary]));
+    const rowsWithPdf = (reportRows ?? []).filter((row) => row.pdf_storage_path);
+    const reportByOrder = new Map<string, { revision: number; state: string; url: string }>();
+    if (rowsWithPdf.length) {
+      const { data: links, error: linkError } = await supabase.storage.from('work-order-reports')
+        .createSignedUrls(rowsWithPdf.map((row) => row.pdf_storage_path as string), 300);
+      if (linkError) setRelatedError('PDFs arquivados, mas não foi possível criar links temporários. Abra a OS para atualizar.');
+      else (links ?? []).forEach((link: any) => {
+        const row = rowsWithPdf.find((candidate) => candidate.pdf_storage_path === link.path);
+        if (row && link.signedUrl) reportByOrder.set(row.work_order_id, { revision: row.revision_number, state: row.state, url: link.signedUrl });
+      });
+    }
+    const mappedOrders = orderRows.map((order) => {
+      const summary: any = summaryByOrder.get(order.id);
+      const reportRow: any = (reportRows ?? []).find((candidate) => candidate.work_order_id === order.id);
+      const reportLink = reportByOrder.get(order.id);
+      return { ...order,
+        checklist_done: summary ? Number(summary.completed_items) : undefined,
+        checklist_total: summary ? Number(summary.total_items) : undefined,
+        checklist_nonconformities: summary ? Number(summary.nonconformities) : undefined,
+        photo_count: summary ? Number(summary.photos) : undefined,
+        report_revision: reportRow?.revision_number,
+        report_state: reportRow?.state,
+        report_url: reportLink?.url,
+      };
+    });
+    setAssetOrders((current) => append ? [...current, ...mappedOrders] : mappedOrders);
+    setIsHistoryLoading(false);
   }
 
   async function loadOperationalReadings(assetId: string) {
@@ -892,21 +964,48 @@ export function AssetAdmin({ tenantId, canManage, onOpenPlan, onOpenOrder }: Pro
             </div>
             {relatedError && <p className="error-message">{relatedError}</p>}
             {assetPlans.length === 0 ? <p className="empty">Nenhum plano vinculado a este equipamento.</p> :
-              <div className="data-list">{assetPlans.map((plan) => <div className="data-row" key={plan.id}>
-                <div><strong>{plan.name}</strong><small>{plan.periodicity_days} dias · próxima execução {plan.next_due_date} · {plan.is_active ? 'Ativo' : 'Inativo'}</small></div>
+              <div className="asset-plan-list">{assetPlans.map((plan) => <article className="asset-plan-card" key={plan.id}>
+                <div className="asset-plan-card-main">
+                  <div className="asset-plan-card-heading"><h4>{plan.name}</h4><span className={`badge asset-plan-${plan.is_active ? 'active' : 'inactive'}`}>{plan.is_active ? 'Ativo' : 'Inativo'}</span></div>
+                  <div className="asset-plan-card-meta"><span>Periodicidade: {plan.periodicity_days} dias</span><span>Próxima execução: {plan.next_due_date ? plan.next_due_date.split('-').reverse().join('/') : 'Não definida'}</span></div>
+                </div>
                 <button type="button" className="secondary" onClick={() => onOpenPlan?.(editingAsset.id, plan.id)}>Abrir plano</button>
-              </div>)}</div>}
+              </article>)}</div>}
           </section>}
 
           {editingAsset && <section className="asset-related-section" aria-label="Histórico de ordens do ativo">
             <div className="panel-head"><div><p className="eyebrow">RASTREABILIDADE</p><h3>Histórico de manutenção</h3></div></div>
+            <p>{historyCounts.preventive} preventivas · {historyCounts.corrective} corretivas · {historyCounts.pending} pendências.</p>
+            <p className="asset-history-range">Mostrando {assetOrders.length} de {historyCounts.preventive + historyCounts.corrective} OS, da mais recente para a mais antiga.</p>
             {assetOrders.length === 0 ? <p className="empty">Nenhuma OS preventiva ou corretiva vinculada.</p> :
-              <div className="data-list">{assetOrders.map((order) => <div className="data-row" key={order.id}>
-                <div><strong>OS #{order.order_number} · {order.type === 'preventive' ? 'Preventiva' : 'Corretiva'} · {order.title}</strong>
-                  <small>{new Date(order.opened_at).toLocaleDateString('pt-BR')} · {order.status} · {order.assigned_profile?.full_name ?? 'Responsável não atribuído'}</small></div>
-                <button type="button" className="secondary" onClick={() => onOpenOrder?.(order.id)}>Abrir OS</button>
-              </div>)}</div>}
-            <p className="empty">Medições, fotos e relatórios permanecem vinculados ao detalhe de cada OS.</p>
+              <div className="asset-history-list">{assetOrders.map((order) => <article className="asset-history-card" key={order.id}>
+                <div className="asset-history-card-head">
+                  <div className="asset-history-card-title">
+                    <span className="asset-history-number">OS #{order.order_number}</span>
+                    <span className={`badge asset-history-type-${order.type}`}>{order.type === 'preventive' ? 'Preventiva' : 'Corretiva'}</span>
+                    <span className={`badge asset-history-status-${order.status}`}>{orderStatusLabels[order.status] ?? order.status}</span>
+                  </div>
+                  <h4>{workOrderDisplayTitle(order.title, order.type)}</h4>
+                </div>
+                <dl className="asset-history-facts">
+                  <div><dt>Abertura</dt><dd>{new Date(order.opened_at).toLocaleDateString('pt-BR')}</dd></div>
+                  <div><dt>Conclusão</dt><dd>{order.completed_at ? new Date(order.completed_at).toLocaleDateString('pt-BR') : '—'}</dd></div>
+                  <div><dt>Responsável</dt><dd>{order.assigned_profile?.full_name ?? 'Não atribuído'}</dd></div>
+                  {order.type === 'preventive' && <>
+                    <div><dt>Atividades</dt><dd>{order.checklist_total === undefined ? 'Não disponível' : `${order.checklist_done ?? 0} de ${order.checklist_total}`}</dd></div>
+                    <div><dt>Fotografias</dt><dd>{order.photo_count === undefined ? 'Não disponível' : order.photo_count}</dd></div>
+                    <div><dt>Relatório</dt><dd>{order.report_revision ? `${reportStateLabels[order.report_state ?? ''] ?? 'Em acompanhamento'} · revisão ${order.report_revision}` : 'Não disponível'}</dd></div>
+                  </>}
+                </dl>
+                <div className="asset-history-actions">
+                  <button type="button" className="secondary" onClick={() => onOpenOrder?.(order.id)}>Abrir OS</button>
+                  {order.report_url && <a className="secondary" href={order.report_url} target="_blank" rel="noreferrer">Visualizar PDF</a>}
+                </div>
+              </article>)}</div>}
+            {assetOrders.length < historyCounts.preventive + historyCounts.corrective && <button type="button" className="secondary"
+              disabled={isHistoryLoading} onClick={() => void loadAssetRelations(editingAsset.id, assetOrders.length, true)}>
+              {isHistoryLoading ? 'Carregando...' : 'Carregar OS mais antigas'}</button>}
+            <p className="asset-history-note">Abra a OS para consultar medições e evidências completas; links de PDF são temporários e protegidos pelo acesso da unidade.</p>
           </section>}
 
           <div className="form-actions">

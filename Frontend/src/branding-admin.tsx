@@ -146,6 +146,7 @@ export function BrandingAdmin({ tenantId }: Props) {
     } else {
       setMessage('Identidade visual salva com sucesso.');
       await loadBranding();
+      window.dispatchEvent(new CustomEvent('marv:branding-updated', { detail: { tenantId } }));
     }
 
     setIsSaving(false);
@@ -195,6 +196,7 @@ export function BrandingAdmin({ tenantId }: Props) {
     } else {
       setMessage('Padrão visual da NETSECBR restaurado.');
       await loadBranding();
+      window.dispatchEvent(new CustomEvent('marv:branding-updated', { detail: { tenantId } }));
     }
 
     setIsSaving(false);

@@ -25,7 +25,8 @@ type LocalDraft = { entries: ChecklistEntry[]; technicalNotes: string; savedAt: 
 // Atividades ilustrativas: NÃO são extraídas de planos, snapshots ou OS reais.
 const sampleActivities: ChecklistActivity[] = [
   { id: 'sample-visual', title: 'Inspeção visual de segurança', instruction: 'Exemplo local: verificar condições gerais e proteções.' },
-  { id: 'sample-measurement', title: 'Medição operacional', instruction: 'Exemplo local: registrar valor e unidade da medição.' },
+  { id: 'sample-measurement', title: 'Medição operacional', instruction: 'Exemplo local: registrar temperatura.',
+    measurementParameter: 'Temperatura', measurementUnit: '°C', measurementPoint: 'Ponto de teste QA' },
   { id: 'sample-functional', title: 'Teste funcional', instruction: 'Exemplo local: registrar resultado do teste após a intervenção.' },
 ];
 
@@ -39,7 +40,8 @@ const stageLabels: Record<PreventiveStage, string> = {
 };
 
 const resultLabels: Record<ChecklistEntry['result'], string> = {
-  pending: 'Pendente', ok: 'Conforme', not_ok: 'Não conforme', not_applicable: 'Não se aplica',
+  pending: 'Pendente', ok: 'Conforme', not_ok: 'Não conforme',
+  not_executed: 'Não realizada', not_applicable: 'Não se aplica',
 };
 
 function readLocalDraft(key: string): LocalDraft | null {

@@ -93,3 +93,20 @@ Entregar uma aplicação web multiempresa para controlar ativos, solicitações 
 - API documentada e controle de acesso por função.
 - Operações críticas registradas em auditoria.
 - Arquivos armazenados fora do banco, com vínculo seguro e acesso autorizado.
+
+## Diretriz consolidada de produto — 02/11/2026
+
+Esta seção complementa os requisitos históricos acima; não declara implementação nem homologação.
+
+O MARV é **um produto multiempresa e uma base funcional**, com duas jornadas configuráveis por tenant, perfil e permissão. O **MARV Industrial** mantém solicitação, triagem, OS corretiva/preventiva, plano, execução, revisão, aceite e prontuário do ativo. O **MARV Prestador de Serviços** permite atendimento avulso com identificação básica de cliente/equipamento, serviço, peças e tempo quando aplicáveis, fotos, aceite, assinatura, PDF e histórico, sem exigir plano ou inventário industrial completo. Um prestador designado a uma OS industrial usa a jornada industrial com acesso restrito; isso não se confunde com o modo leve. Ocultar menus não substitui autorização no banco e no Storage.
+
+### Requisitos funcionais complementares e mensuráveis
+
+- **Planos por ativo:** consultar, criar, editar, ativar/desativar e copiar planos no detalhe do ativo; admitir planos anual e trimestral independentes. Para robôs, sugerir o Modelo MARV com 16 atividades; o Modelo Personalizado começa vazio por escolha explícita. Confirmar leitura após gravar. Revisões posteriores não podem alterar snapshots de OS anteriores.
+- **OS preventiva:** selecionar plano ativo na aprovação de solicitação preventiva, criar por RPC idempotente e inicializar checklist por snapshot sem duplicação. Uma OS preventiva ativa por equipamento; concluídas/canceladas não bloqueiam nova intervenção. Conflitos devem identificar a OS e oferecer caminho para abri-la. Conclusão depende de execução, revisão e aceite exigidos.
+- **Execução móvel:** cada atividade exibe somente resultado, observação e campos de medição configurados para ela. Fotos aparecem no próprio card, são vinculadas ao item e persistidas em Storage privado. Foto obrigatória impede o encerramento, mas não o rascunho. Não conformidade abre, de modo idempotente, uma solicitação corretiva vinculada, sem gerar OS corretiva automaticamente.
+- **Relatório e aceite:** consolidar dados persistidos em PDF recuperável; supervisor autorizado aprova ou devolve com autoria; assinatura do representante fica vinculada à versão final, com trilha de auditoria e acesso autorizado. Uma simulação local não satisfaz este requisito.
+- **Prontuário do ativo:** apresentar OS preventivas/corretivas, responsáveis, datas, medições, horímetro, fotos, custos e relatórios quando registrados. Indicadores V1 usam somente dados reais; histórico fictício não pode aparecer como fato.
+- **Bloqueios úteis:** informar em linguagem clara motivo, registro envolvido e próximo passo permitido. Salvar progresso deve permitir retomada confiável, sem depender de F5.
+
+Itens de fases posteriores — BI avançado, cobrança automatizada, IA, IIoT, ERP, compras completas e importação de históricos com proveniência — permanecem no planejamento. A necessidade de cobrança efetiva deve ser decidida antes do lançamento público pago.

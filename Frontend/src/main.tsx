@@ -20,7 +20,6 @@ import {
 } from 'lucide-react';
 import { AuthGate, type CurrentAccount } from './auth-gate';
 import {
-  type OperationalAsset as Asset,
   type OperationalWorkOrder as WorkOrder,
   type PendingServiceRequest,
   type UpcomingPreventivePlan,
@@ -40,7 +39,11 @@ import { PreventivePlanAdmin } from './preventive-plan-admin';
 import { SupportTicketAdmin } from './support-ticket-admin';
 import { HelpCenterPage } from './help-center';
 import { CommandCenter } from './command-center';
+import { PlatformApp } from './platform-app';
+import { workOrderDisplayTitle } from './work-order-label';
+import { ClientExecutiveOverview } from './client-executive-overview';
 import './styles.css';
+import './executive-dashboard.css';
 import './brand.css';
 import './auth.css';
 
@@ -52,25 +55,62 @@ function Badge({ children }: { children: string }) {
   );
 }
 
-function App({ account }: { account: CurrentAccount }) {
-  const [page, setPage] = useState<
-    | 'dashboard'
-    | 'assets'
-    | 'requests'
-    | 'orders'
-    | 'preventive_plans'
-    | 'help'
-    | 'purchases'
-    | 'client_admin'
-    | 'netsecbr_admin'
-  >('dashboard');
+type Page = 'dashboard' | 'assets' | 'requests' | 'orders' | 'preventive_plans' | 'help' | 'purchases' | 'client_admin' | 'netsecbr_admin';
+
+function canOpenPage(page: string, account: CurrentAccount): page is Page {
+  const allowed = (permission: string) => account.isNetsecbrAdmin || account.isTenantAdmin || account.permissions.includes(permission);
+  switch (page) {
+    case 'dashboard': case 'help': return true;
+    case 'assets': return allowed('assets.read') || allowed('assets.manage');
+    case 'requests': return allowed('service_requests.create');
+    case 'orders': return allowed('work_orders.read') || allowed('work_orders.create');
+    case 'preventive_plans': return allowed('assets.read') || allowed('assets.manage') || allowed('work_orders.read') || allowed('work_orders.create');
+    case 'purchases': return allowed('purchase_requests.approve');
+    case 'client_admin': return account.isTenantAdmin || account.isNetsecbrAdmin;
+    case 'netsecbr_admin': return account.isNetsecbrAdmin;
+    default: return false;
+  }
+}
+
+function TenantApp({ account }: { account: CurrentAccount }) {
+  const [tenantBranding, setTenantBranding] = useState<{ name: string | null; logoUrl: string | null }>({ name: null, logoUrl: null });
+  useEffect(() => {
+    if (!account.tenantId) return;
+    let active = true;
+    const refreshBranding = () => { void (async () => {
+      const { data, error } = await supabase.from('tenant_branding')
+        .select('display_name, logo_path').eq('tenant_id', account.tenantId).maybeSingle();
+      if (!active || error || !data) return;
+      let logoUrl: string | null = null;
+      if (data.logo_path) {
+        const { data: signed, error: signedError } = await supabase.storage
+          .from('tenant-branding').createSignedUrl(data.logo_path, 86400);
+        if (!signedError) logoUrl = signed?.signedUrl ?? null;
+      }
+      if (active) setTenantBranding({ name: data.display_name, logoUrl });
+    })(); };
+    refreshBranding();
+    const onBrandingUpdated = (event: Event) => {
+      if ((event as CustomEvent<{ tenantId: string }>).detail?.tenantId === account.tenantId) refreshBranding();
+    };
+    window.addEventListener('marv:branding-updated', onBrandingUpdated);
+    return () => { active = false; window.removeEventListener('marv:branding-updated', onBrandingUpdated); };
+  }, [account.tenantId]);
+  const pageStorageKey = `marv:last-page:${account.userId}:${account.tenantId}`;
+  const [page, setPage] = useState<Page>(() => {
+    try {
+      const stored = window.sessionStorage.getItem(pageStorageKey) ?? '';
+      return canOpenPage(stored, account) ? stored : 'dashboard';
+    } catch { return 'dashboard'; }
+  });
+  useEffect(() => {
+    try { window.sessionStorage.setItem(pageStorageKey, page); } catch { /* storage indisponível */ }
+  }, [pageStorageKey, page]);
   const [focusedWorkOrderId, setFocusedWorkOrderId] = useState<string | null>(null);
   const [focusedPlan, setFocusedPlan] = useState<{ assetId: string; planId?: string; create?: boolean } | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const {
-    assets,
     orders,
-    overduePreventivePlans,
     upcomingPreventivePlans,
     pendingServiceRequests,
     isLoading,
@@ -101,6 +141,7 @@ function App({ account }: { account: CurrentAccount }) {
   ] as const;
 
   async function signOut() {
+    try { window.sessionStorage.removeItem(pageStorageKey); } catch { /* storage indisponível */ }
     await supabase.auth.signOut();
   }
 
@@ -148,6 +189,7 @@ function App({ account }: { account: CurrentAccount }) {
 
   // Atalhos do Dashboard seguem exatamente as mesmas condições do menu:
   // nenhum botão abre um módulo que estaria oculto na navegação.
+  const canOpenAssets = canAccess('assets.read') || canAccess('assets.manage');
   const canOpenOrders = canAccess('work_orders.read') || canAccess('work_orders.create');
   const canOpenRequests = canAccess('service_requests.create');
   const canApproveRequests = account.isTenantAdmin || account.isNetsecbrAdmin;
@@ -162,7 +204,10 @@ function App({ account }: { account: CurrentAccount }) {
       <aside className={menuOpen ? 'sidebar open' : 'sidebar'}>
         <div className="brand">
           <div className="brand-logo">
-            <img src="/brand/logo_netsecbr.png" alt="NetSecBR" />
+            <img
+              src={page === 'netsecbr_admin' ? '/brand/logo_netsecbr.png' : tenantBranding.logoUrl ?? '/brand/logo_netsecbr.png'}
+              alt={page === 'netsecbr_admin' ? 'NetSecBR' : tenantBranding.name ?? account.tenantName}
+            />
           </div>
 
           <div>
@@ -176,7 +221,7 @@ function App({ account }: { account: CurrentAccount }) {
 
         <div className="workspace">
           <Factory size={17} />
-          <span>{account.tenantName}</span>
+          <span>{page === 'netsecbr_admin' ? 'NETSECBR' : tenantBranding.name ?? account.tenantName}</span>
           <small>{account.roleLabel}</small>
         </div>
 
@@ -285,17 +330,20 @@ function App({ account }: { account: CurrentAccount }) {
 
         {!isLoading && page === 'dashboard' && (
           <Dashboard
-            assets={assets}
+            tenantId={account.tenantId}
             orders={orders}
-            overduePreventivePlans={overduePreventivePlans}
             upcomingPreventivePlans={upcomingPreventivePlans}
             pendingServiceRequests={pendingServiceRequests}
             canOpenOrders={canOpenOrders}
+            canOpenAssets={canOpenAssets}
             canOpenPreventivePlans={canOpenPreventivePlans}
             canOpenRequests={canOpenRequests}
             canApproveRequests={canApproveRequests}
             onOpenOrders={() => {
               if (canOpenOrders) setPage('orders');
+            }}
+            onOpenAssets={() => {
+              if (canOpenAssets) setPage('assets');
             }}
             onOpenPreventivePlans={() => {
               if (canOpenPreventivePlans) setPage('preventive_plans');
@@ -430,34 +478,34 @@ function getPreventiveRelativeLabel(nextDueDate: string) {
 }
 
 function Dashboard({
-  assets,
+  tenantId,
   orders,
-  overduePreventivePlans,
   upcomingPreventivePlans,
   pendingServiceRequests,
+  canOpenAssets,
   canOpenOrders,
   canOpenPreventivePlans,
   canOpenRequests,
   canApproveRequests,
+  onOpenAssets,
   onOpenOrders,
   onOpenPreventivePlans,
   onOpenRequests,
 }: {
-  assets: Asset[];
+  tenantId: string;
   orders: WorkOrder[];
-  overduePreventivePlans: number;
   upcomingPreventivePlans: UpcomingPreventivePlan[];
   pendingServiceRequests: PendingServiceRequest[];
+  canOpenAssets: boolean;
   canOpenOrders: boolean;
   canOpenPreventivePlans: boolean;
   canOpenRequests: boolean;
   canApproveRequests: boolean;
+  onOpenAssets: () => void;
   onOpenOrders: () => void;
   onOpenPreventivePlans: () => void;
   onOpenRequests: () => void;
 }) {
-  const critical = orders.filter((order) => order.priority === 'Crítica').length;
-
   return (
     <section className="content admin-panel">
       <div className="quick">
@@ -469,70 +517,24 @@ function Dashboard({
         )}
       </div>
 
-      <div className="metrics">
-        <Metric
-          label="OS abertas"
-          value={String(orders.length)}
-          trend={`${critical} críticas`}
-          icon={<ClipboardList />}
-        />
-
-        <Metric
-          label="Preventivas atrasadas"
-          value={String(overduePreventivePlans)}
-          trend={
-            overduePreventivePlans === 0
-              ? 'Nenhuma preventiva atrasada'
-              : overduePreventivePlans === 1
-                ? '1 plano requer atenção'
-                : `${overduePreventivePlans} planos requerem atenção`
-          }
-          icon={<AlertTriangle />}
-          warn={overduePreventivePlans > 0}
-        />
-
-        {canApproveRequests && (
-          <Metric
-            label="Aprovações pendentes"
-            value={String(pendingServiceRequests.length)}
-            trend={
-              pendingServiceRequests.length === 0
-                ? 'Nenhuma solicitação aguardando aprovação'
-                : pendingServiceRequests.length === 1
-                  ? '1 solicitação pronta para gerar OS'
-                  : `${pendingServiceRequests.length} solicitações prontas para gerar OS`
-            }
-            icon={<ClipboardList />}
-            warn={pendingServiceRequests.length > 0}
-          />
-        )}
-
-        <Metric
-          label="Ativos em parada"
-          value={String(
-            assets.filter(
-              (asset) =>
-                asset.status === 'Parado' || asset.status === 'Em manutenção',
-            ).length,
-          )}
-          trend={`de ${assets.length} ativos`}
-          icon={<Wrench />}
-        />
-
-        <Metric
-          label="Disponibilidade"
-          value="—"
-          trend="Indicador em breve"
-          icon={<Factory />}
-        />
-      </div>
+      <ClientExecutiveOverview
+        tenantId={tenantId}
+        canOpenAssets={canOpenAssets}
+        canOpenPlans={canOpenPreventivePlans}
+        canOpenOrders={canOpenOrders}
+        canOpenRequests={canOpenRequests}
+        onOpenAssets={onOpenAssets}
+        onOpenPlans={onOpenPreventivePlans}
+        onOpenOrders={onOpenOrders}
+        onOpenRequests={onOpenRequests}
+      />
 
       <div className="grid">
         <article className="panel orders-panel">
           <div className="panel-head">
             <div>
-              <p className="eyebrow">ATENÇÃO IMEDIATA</p>
-              <h2>Ordens prioritárias</h2>
+              <p className="eyebrow">ACOMPANHAMENTO</p>
+              <h2>OS recentes</h2>
             </div>
 
             {canOpenOrders && (
@@ -550,7 +552,7 @@ function Dashboard({
 
               <div>
                 <strong>
-                  OS #{order.number} · {order.title}
+                  OS #{order.number} · {workOrderDisplayTitle(order.title, order.type.toLowerCase() === 'preventiva' ? 'preventive' : order.type.toLowerCase())}
                 </strong>
                 <p>
                   {order.asset} · {order.technician}
@@ -646,43 +648,6 @@ function Dashboard({
         </article>}
       </div>
 
-      <article className="panel asset-health">
-        <div className="panel-head">
-          <div>
-            <p className="eyebrow">VISÃO OPERACIONAL</p>
-            <h2>Saúde dos ativos</h2>
-          </div>
-
-          {canOpenOrders && (
-            <button onClick={onOpenOrders}>
-              Ver ordens <ArrowRight size={16} />
-            </button>
-          )}
-        </div>
-
-        <div className="health-row">
-          <div>
-            <b className="green">
-              {assets.filter((asset) => asset.status === 'Operando').length}
-            </b>
-            <span>Operando normalmente</span>
-          </div>
-
-          <div>
-            <b className="yellow">
-              {assets.filter((asset) => asset.status === 'Em manutenção').length}
-            </b>
-            <span>Em manutenção</span>
-          </div>
-
-          <div>
-            <b className="red">
-              {assets.filter((asset) => asset.status === 'Parado').length}
-            </b>
-            <span>Parados</span>
-          </div>
-        </div>
-      </article>
     </section>
   );
 }
@@ -698,7 +663,19 @@ function AdminPanel({
   account?: CurrentAccount;
   navigationSignal?: number;
 }) {
-  const [selected, setSelected] = useState<string | null>(null);
+  const settingsKey = `marv:settings:${account?.userId ?? 'anonymous'}:${account?.tenantId ?? ''}`;
+  const [selected, setSelected] = useState<string | null>(() => {
+    try {
+      const saved = window.sessionStorage.getItem(settingsKey);
+      return saved && cards.includes(saved) ? saved : null;
+    } catch { return null; }
+  });
+  useEffect(() => {
+    try {
+      if (selected) window.sessionStorage.setItem(settingsKey, selected);
+      else window.sessionStorage.removeItem(settingsKey);
+    } catch { /* storage indisponível */ }
+  }, [settingsKey, selected]);
   const lastNavigationSignal = useRef(navigationSignal);
   const cardCategories: Record<string, string> = {
     'Usuários e permissões': 'ACESSOS',
@@ -879,29 +856,6 @@ function UserAdmin({
   );
 }
 
-function Metric({
-  label,
-  value,
-  trend,
-  icon,
-  warn,
-}: {
-  label: string;
-  value: string;
-  trend: string;
-  icon: React.ReactNode;
-  warn?: boolean;
-}) {
-  return (
-    <article className={`metric ${warn ? 'warning' : ''}`}>
-      <div className="metric-icon">{icon}</div>
-      <p>{label}</p>
-      <h2>{value}</h2>
-      <small>{trend}</small>
-    </article>
-  );
-}
-
 createRoot(document.getElementById('root')!).render(
-  <AuthGate>{(account) => <App account={account} />}</AuthGate>,
+  <AuthGate>{(account) => account.isNetsecbrAdmin ? <PlatformApp account={account} /> : <TenantApp account={account} />}</AuthGate>,
 );
